@@ -22,5 +22,6 @@ COPY documents/ documents/
 # Install the project.
 RUN uv pip install --system --no-cache-dir -e .
 
-ENTRYPOINT ["python", "-m", "rag_system"]
-CMD ["--help"]
+EXPOSE 8000
+
+CMD ["uvicorn", "rag_system.web:app", "--host", "0.0.0.0", "--port", "8000"]

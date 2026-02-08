@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: #1e293b;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #334155;
+        }
+
+        header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 4px;
+        }
+
+        .status-dot.ok { background: #22c55e; }
+        .status-dot.err { background: #ef4444; }
+
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .btn:hover { background: #2563eb; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.secondary { background: #475569; }
+        .btn.secondary:hover { background: #64748b; }
+
+        #chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            max-width: 720px;
+            line-height: 1.6;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #1e3a5f;
+            padding: 12px 16px;
+            border-radius: 12px 12px 4px 12px;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: #1e293b;
+            padding: 16px;
+            border-radius: 12px 12px 12px 4px;
+            border: 1px solid #334155;
+        }
+
+        .message.assistant .answer { white-space: pre-wrap; }
+
+        .sources {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #334155;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        .sources summary {
+            cursor: pointer;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .source-item {
+            background: #0f172a;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .source-item .meta {
+            color: #64748b;
+            font-size: 11px;
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-size: 15px;
+            text-align: center;
+            line-height: 1.8;
+        }
+
+        .input-area {
+            padding: 16px 24px;
+            background: #1e293b;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 8px;
+        }
+
+        #question {
+            flex: 1;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        #question:focus { border-color: #3b82f6; }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #475569;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .thinking {
+            align-self: flex-start;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>RAG System</h1>
+        <div class="status-bar">
+            <span>
+                <span id="ollama-dot" class="status-dot"></span>
+                <span id="ollama-label">Checking...</span>
+            </span>
+            <span id="doc-count">-- chunks</span>
+            <button class="btn secondary" id="ingest-btn" onclick="ingestDocuments()">
+                Ingest Documents
+            </button>
+        </div>
+    </header>
+
+    <div id="chat">
+        <div class="empty-state" id="empty-state">
+            Ask a question about your documents.<br>
+            Make sure to ingest documents first.
+        </div>
+    </div>
+
+    <div class="input-area">
+        <input type="text" id="question" placeholder="Ask a question..."
+               onkeydown="if(event.key==='Enter') askQuestion()" autofocus>
+        <button class="btn" id="send-btn" onclick="askQuestion()">Send</button>
+    </div>
+
+    <script>
+        const chat = document.getElementById("chat");
+        const input = document.getElementById("question");
+        const sendBtn = document.getElementById("send-btn");
+        const ingestBtn = document.getElementById("ingest-btn");
+        const emptyState = document.getElementById("empty-state");
+
+        function addMessage(role, content, sources) {
+            if (emptyState) emptyState.remove();
+
+            const div = document.createElement("div");
+            div.className = "message " + role;
+
+            if (role === "assistant") {
+                let html = '<div class="answer">' + escapeHtml(content) + "</div>";
+                if (sources && sources.length > 0) {
+                    html += '<details class="sources"><summary>Sources (' + sources.length + ")</summary>";
+                    sources.forEach(function(s) {
+                        html += '<div class="source-item">';
+                        html += '<div class="meta">' + escapeHtml(s.source) + " &middot; relevance: " + s.relevance.toFixed(2) + "</div>";
+                        html += escapeHtml(s.text.substring(0, 200));
+                        if (s.text.length > 200) html += "...";
+                        html += "</div>";
+                    });
+                    html += "</details>";
+                }
+                div.innerHTML = html;
+            } else {
+                div.textContent = content;
+            }
+
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function showThinking() {
+            if (emptyState) emptyState.remove();
+            const div = document.createElement("div");
+            div.className = "thinking";
+            div.id = "thinking";
+            div.innerHTML = '<span class="spinner"></span> Thinking...';
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function hideThinking() {
+            const el = document.getElementById("thinking");
+            if (el) el.remove();
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement("div");
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        async function askQuestion() {
+            const q = input.value.trim();
+            if (!q) return;
+
+            input.value = "";
+            sendBtn.disabled = true;
+            addMessage("user", q);
+            showThinking();
+
+            try {
+                const res = await fetch("/api/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: q }),
+                });
+                const data = await res.json();
+                hideThinking();
+                addMessage("assistant", data.answer, data.sources);
+            } catch (err) {
+                hideThinking();
+                addMessage("assistant", "Error: Could not reach the server.");
+            }
+
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        async function ingestDocuments() {
+            ingestBtn.disabled = true;
+            ingestBtn.textContent = "Ingesting...";
+
+            try {
+                const res = await fetch("/api/ingest", { method: "POST" });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    ingestBtn.textContent = data.chunks + " chunks ingested!";
+                } else {
+                    ingestBtn.textContent = "No documents found";
+                }
+                fetchStatus();
+            } catch (err) {
+                ingestBtn.textContent = "Ingest failed";
+            }
+
+            setTimeout(function() {
+                ingestBtn.textContent = "Ingest Documents";
+                ingestBtn.disabled = false;
+            }, 3000);
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch("/api/status");
+                const data = await res.json();
+
+                const dot = document.getElementById("ollama-dot");
+                const label = document.getElementById("ollama-label");
+                dot.className = "status-dot " + (data.ollama_connected ? "ok" : "err");
+                label.textContent = data.model + (data.ollama_connected ? "" : " (offline)");
+
+                document.getElementById("doc-count").textContent = data.documents + " chunks";
+            } catch (err) {
+                // ignore
+            }
+        }
+
+        fetchStatus();
+    </script>
+</body>
+</html>

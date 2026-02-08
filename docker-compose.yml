@@ -20,13 +20,13 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+    ports:
+      - "8000:8000"
     environment:
       - OLLAMA_HOST=http://ollama:11434
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
-    stdin_open: true
-    tty: true
 
 volumes:
   ollama_data:
