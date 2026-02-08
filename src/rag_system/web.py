@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -22,6 +23,7 @@ _client = None
 _collection = None
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
@@ -36,6 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RAG System", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 class AskRequest(BaseModel):
