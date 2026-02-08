@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -61,6 +61,12 @@ class IngestResponse(BaseModel):
     chunks: int
 
 
+class UploadResponse(BaseModel):
+    status: str
+    files_saved: int
+    chunks: int
+
+
 class StatusResponse(BaseModel):
     documents: int
     model: str
@@ -86,6 +92,38 @@ async def api_ingest():
     added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
 
     return IngestResponse(status="ok", chunks=added)
+
+
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
+
+
+@app.post("/api/upload", response_model=UploadResponse)
+async def api_upload(files: list[UploadFile]):
+    global _collection
+    docs_dir = Path(_config.documents_dir)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for file in files:
+        if not file.filename:
+            continue
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            continue
+        dest = docs_dir / file.filename
+        content = await file.read()
+        dest.write_bytes(content)
+        saved += 1
+
+    if saved == 0:
+        return UploadResponse(status="no_valid_files", files_saved=0, chunks=0)
+
+    documents = load_documents(str(docs_dir))
+    chunks = chunk_documents(documents, _config.chunk)
+    _collection = vs.reset_collection(_client, _config.vector_store)
+    added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
+
+    return UploadResponse(status="ok", files_saved=saved, chunks=added)
 
 
 @app.post("/api/ask", response_model=AskResponse)
