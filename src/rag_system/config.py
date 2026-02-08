@@ -1,12 +1,13 @@
 """Centralized configuration for the RAG system."""
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class ChunkConfig(BaseModel):
+class ChunkConfig(BaseSettings):
     """Text chunking parameters."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = SettingsConfigDict(env_prefix="CHUNK_", frozen=True)
 
     size: int = Field(default=500, gt=0)
     overlap: int = Field(default=50, ge=0)
@@ -19,10 +20,10 @@ class ChunkConfig(BaseModel):
         return self
 
 
-class VectorStoreConfig(BaseModel):
+class VectorStoreConfig(BaseSettings):
     """ChromaDB vector store settings."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = SettingsConfigDict(env_prefix="VS_", frozen=True)
 
     db_path: str = "./chroma_db"
     collection_name: str = "rag_documents"
@@ -31,20 +32,23 @@ class VectorStoreConfig(BaseModel):
     batch_size: int = Field(default=100, gt=0)
 
 
-class LLMConfig(BaseModel):
+class LLMConfig(BaseSettings):
     """Ollama LLM settings."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = SettingsConfigDict(env_prefix="LLM_", frozen=True)
 
     model: str = "tinyllama"
+    available_models: list[str] = Field(
+        default=["tinyllama", "llama3.2:1b", "gemma3:1b"],
+    )
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=512, gt=0)
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseSettings):
     """Top-level application configuration."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = SettingsConfigDict(frozen=True)
 
     documents_dir: str = "./documents"
     chunk: ChunkConfig = Field(default_factory=ChunkConfig)
