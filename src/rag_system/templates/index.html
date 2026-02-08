@@ -157,6 +157,19 @@
 
         #question:focus { border-color: #3b82f6; }
 
+        #model-select {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        #model-select:focus { border-color: #3b82f6; }
+
         .spinner {
             display: inline-block;
             width: 16px;
@@ -177,6 +190,79 @@
             gap: 8px;
             font-size: 14px;
         }
+
+        .btn.danger { background: #dc2626; }
+        .btn.danger:hover { background: #b91c1c; }
+
+        #doc-panel {
+            display: none;
+            position: fixed;
+            top: 0; right: 0;
+            width: 340px;
+            height: 100vh;
+            background: #1e293b;
+            border-left: 1px solid #334155;
+            z-index: 100;
+            flex-direction: column;
+        }
+
+        #doc-panel.open { display: flex; }
+
+        .panel-header {
+            padding: 16px;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+        }
+
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+        }
+
+        .doc-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: #0f172a;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .doc-item .doc-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .doc-item .doc-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .doc-item .doc-size {
+            color: #64748b;
+            font-size: 11px;
+        }
+
+        .doc-item .btn {
+            padding: 4px 10px;
+            font-size: 12px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+
+        .panel-empty {
+            color: #475569;
+            text-align: center;
+            padding: 32px 0;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -185,16 +271,27 @@
         <div class="status-bar">
             <span>
                 <span id="ollama-dot" class="status-dot"></span>
-                <span id="ollama-label">Checking...</span>
+                <select id="model-select"><option>Loading...</option></select>
             </span>
             <span id="doc-count">-- chunks</span>
             <input type="file" id="file-input" multiple accept=".txt,.md,.pdf" style="display:none"
                    onchange="uploadFiles()">
             <button class="btn secondary" id="upload-btn" onclick="document.getElementById('file-input').click()">
-                Upload Documents
+                Upload
+            </button>
+            <button class="btn secondary" onclick="toggleDocPanel()">
+                Manage
             </button>
         </div>
     </header>
+
+    <div id="doc-panel">
+        <div class="panel-header">
+            <span>Documents</span>
+            <button class="btn secondary" onclick="toggleDocPanel()" style="padding:4px 10px;font-size:12px;">Close</button>
+        </div>
+        <div class="panel-body" id="doc-list"></div>
+    </div>
 
     <div id="chat">
         <div class="empty-state" id="empty-state">
@@ -278,7 +375,7 @@
                 const res = await fetch("/api/ask", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ question: q }),
+                    body: JSON.stringify({ question: q, model: document.getElementById("model-select").value }),
                 });
                 const data = await res.json();
                 hideThinking();
@@ -334,13 +431,79 @@
                 const data = await res.json();
 
                 const dot = document.getElementById("ollama-dot");
-                const label = document.getElementById("ollama-label");
                 dot.className = "status-dot " + (data.ollama_connected ? "ok" : "err");
-                label.textContent = data.model + (data.ollama_connected ? "" : " (offline)");
+
+                const select = document.getElementById("model-select");
+                const current = select.value;
+                if (data.available_models && select.options.length <= 1 && select.options[0].text === "Loading...") {
+                    select.innerHTML = "";
+                    data.available_models.forEach(function(m) {
+                        const opt = document.createElement("option");
+                        opt.value = m;
+                        opt.textContent = m;
+                        if (m === data.model) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                }
 
                 document.getElementById("doc-count").textContent = data.documents + " chunks";
             } catch (err) {
                 // ignore
+            }
+        }
+
+        function toggleDocPanel() {
+            const panel = document.getElementById("doc-panel");
+            panel.classList.toggle("open");
+            if (panel.classList.contains("open")) loadDocuments();
+        }
+
+        async function loadDocuments() {
+            const list = document.getElementById("doc-list");
+            list.innerHTML = '<div class="panel-empty">Loading...</div>';
+
+            try {
+                const res = await fetch("/api/documents");
+                const data = await res.json();
+
+                if (data.files.length === 0) {
+                    list.innerHTML = '<div class="panel-empty">No documents uploaded yet.</div>';
+                    return;
+                }
+
+                list.innerHTML = "";
+                data.files.forEach(function(f) {
+                    const item = document.createElement("div");
+                    item.className = "doc-item";
+                    item.innerHTML =
+                        '<div class="doc-info">' +
+                            '<div class="doc-name">' + escapeHtml(f.filename) + '</div>' +
+                            '<div class="doc-size">' + f.size_kb + ' KB</div>' +
+                        '</div>' +
+                        '<button class="btn danger" onclick="deleteDocument(\'' +
+                            escapeHtml(f.filename).replace(/'/g, "\\'") +
+                        '\')">Delete</button>';
+                    list.appendChild(item);
+                });
+            } catch (err) {
+                list.innerHTML = '<div class="panel-empty">Failed to load documents.</div>';
+            }
+        }
+
+        async function deleteDocument(filename) {
+            if (!confirm("Delete " + filename + "? The vector store will be re-indexed.")) return;
+
+            try {
+                const res = await fetch("/api/documents/" + encodeURIComponent(filename), {
+                    method: "DELETE",
+                });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    loadDocuments();
+                    fetchStatus();
+                }
+            } catch (err) {
+                alert("Delete failed.");
             }
         }
 

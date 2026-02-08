@@ -43,6 +43,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 class AskRequest(BaseModel):
     question: str
+    model: str | None = None
 
 
 class SourceResponse(BaseModel):
@@ -67,9 +68,24 @@ class UploadResponse(BaseModel):
     chunks: int
 
 
+class DocumentInfo(BaseModel):
+    filename: str
+    size_kb: float
+
+
+class DocumentListResponse(BaseModel):
+    files: list[DocumentInfo]
+
+
+class DeleteResponse(BaseModel):
+    status: str
+    chunks: int
+
+
 class StatusResponse(BaseModel):
     documents: int
     model: str
+    available_models: list[str]
     ollama_connected: bool
 
 
@@ -126,12 +142,56 @@ async def api_upload(files: list[UploadFile]):
     return UploadResponse(status="ok", files_saved=saved, chunks=added)
 
 
+@app.get("/api/documents", response_model=DocumentListResponse)
+async def api_list_documents():
+    docs_dir = Path(_config.documents_dir)
+    if not docs_dir.exists():
+        return DocumentListResponse(files=[])
+
+    files = []
+    for p in sorted(docs_dir.iterdir()):
+        if p.is_file() and p.suffix.lower() in ALLOWED_EXTENSIONS:
+            files.append(
+                DocumentInfo(
+                    filename=p.name,
+                    size_kb=round(p.stat().st_size / 1024, 1),
+                )
+            )
+    return DocumentListResponse(files=files)
+
+
+@app.delete("/api/documents/{filename}", response_model=DeleteResponse)
+async def api_delete_document(filename: str):
+    global _collection
+    docs_dir = Path(_config.documents_dir)
+    target = docs_dir / filename
+
+    if not target.is_file() or target.suffix.lower() not in ALLOWED_EXTENSIONS:
+        return DeleteResponse(status="not_found", chunks=0)
+
+    target.unlink()
+
+    remaining = load_documents(str(docs_dir))
+    _collection = vs.reset_collection(_client, _config.vector_store)
+    if remaining:
+        chunks = chunk_documents(remaining, _config.chunk)
+        added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
+    else:
+        added = 0
+
+    return DeleteResponse(status="ok", chunks=added)
+
+
 @app.post("/api/ask", response_model=AskResponse)
 async def api_ask(body: AskRequest):
+    llm_config = _config.llm
+    if body.model and body.model in _config.llm.available_models:
+        llm_config = _config.llm.model_copy(update={"model": body.model})
+
     response = rag_engine.ask(
         body.question,
         _collection,
-        config=_config.llm,
+        config=llm_config,
         n_results=_config.vector_store.query_results,
     )
 
@@ -156,5 +216,6 @@ async def api_status():
     return StatusResponse(
         documents=_collection.count() if _collection else 0,
         model=_config.llm.model,
+        available_models=_config.llm.available_models,
         ollama_connected=connected,
     )
