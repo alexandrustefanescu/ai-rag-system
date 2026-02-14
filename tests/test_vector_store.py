@@ -4,9 +4,9 @@ import tempfile
 
 import pytest
 
+from rag_system import vector_store as vs
 from rag_system.config import VectorStoreConfig
 from rag_system.models import Chunk
-from rag_system import vector_store as vs
 
 
 @pytest.fixture
@@ -39,7 +39,10 @@ class TestGetOrCreateCollection:
         assert collection is not None
         assert collection.name == "test_collection"
 
-    def test_returns_existing_collection(self, tmp_db_config: VectorStoreConfig) -> None:
+    def test_returns_existing_collection(
+        self,
+        tmp_db_config: VectorStoreConfig,
+    ) -> None:
         client = vs.get_client(tmp_db_config)
         c1 = vs.get_or_create_collection(client, tmp_db_config)
         c2 = vs.get_or_create_collection(client, tmp_db_config)
@@ -82,7 +85,11 @@ class TestQuery:
 
 
 class TestResetCollection:
-    def test_clears_existing_data(self, tmp_db_config: VectorStoreConfig, sample_chunks) -> None:
+    def test_clears_existing_data(
+        self,
+        tmp_db_config: VectorStoreConfig,
+        sample_chunks,
+    ) -> None:
         client = vs.get_client(tmp_db_config)
         collection = vs.get_or_create_collection(client, tmp_db_config)
         vs.add_chunks(collection, sample_chunks)

@@ -42,9 +42,11 @@ class TestChunkText:
             assert chunk.strip()
 
     def test_paragraph_boundary_preferred(self) -> None:
-        text = ("First paragraph content here.\n\n"
-                "Second paragraph content here.\n\n"
-                "Third paragraph.")
+        text = (
+            "First paragraph content here.\n\n"
+            "Second paragraph content here.\n\n"
+            "Third paragraph."
+        )
         chunks = chunk_text(text, chunk_size=50, chunk_overlap=5)
         assert len(chunks) >= 2
 

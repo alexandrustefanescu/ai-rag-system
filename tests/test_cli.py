@@ -222,4 +222,4 @@ class TestMain:
             main()
 
         cfg = mock_chat.call_args[0][0]
-        assert cfg.llm.model == "tinyllama"
+        assert cfg.llm.model == "gemma3:1b"

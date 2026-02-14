@@ -79,7 +79,7 @@ class TestGenerateAnswer:
         mock_ollama.chat.return_value = {"message": {"content": "Answer"}}
         generate_answer("Q?", "Context.")
         call_kwargs = mock_ollama.chat.call_args
-        assert call_kwargs.kwargs["model"] == "tinyllama"
+        assert call_kwargs.kwargs["model"] == "gemma3:1b"
 
 
 class TestAsk:

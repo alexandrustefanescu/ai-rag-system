@@ -10,7 +10,7 @@ class TestChunkConfig:
     def test_defaults(self) -> None:
         c = ChunkConfig()
         assert c.size == 500
-        assert c.overlap == 50
+        assert c.overlap == 100
 
     def test_custom_values(self) -> None:
         c = ChunkConfig(size=1000, overlap=100)
@@ -53,7 +53,7 @@ class TestVectorStoreConfig:
         assert c.db_path == "./chroma_db"
         assert c.collection_name == "rag_documents"
         assert c.embedding_model == "all-MiniLM-L6-v2"
-        assert c.query_results == 3
+        assert c.query_results == 5
         assert c.batch_size == 100
 
     def test_rejects_zero_query_results(self) -> None:
@@ -68,7 +68,7 @@ class TestVectorStoreConfig:
 class TestLLMConfig:
     def test_defaults(self) -> None:
         c = LLMConfig()
-        assert c.model == "tinyllama"
+        assert c.model == "gemma3:1b"
         assert c.temperature == 0.3
         assert c.max_tokens == 512
 
