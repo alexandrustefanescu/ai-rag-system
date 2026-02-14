@@ -4,10 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from rag_system import rag_engine
@@ -24,7 +22,6 @@ _collection = None
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @asynccontextmanager
@@ -37,8 +34,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="RAG System", lifespan=lifespan)
+app = FastAPI(
+    title="RAG System",
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+router = APIRouter(prefix="/api/v1")
 
 
 class AskRequest(BaseModel):
@@ -71,6 +75,7 @@ class UploadResponse(BaseModel):
 class DocumentInfo(BaseModel):
     filename: str
     size_kb: float
+    chunk_count: int = 0
 
 
 class DocumentListResponse(BaseModel):
@@ -82,6 +87,12 @@ class DeleteResponse(BaseModel):
     chunks: int
 
 
+class HealthResponse(BaseModel):
+    status: str
+    ollama_connected: bool
+    documents: int
+
+
 class StatusResponse(BaseModel):
     documents: int
     model: str
@@ -89,12 +100,27 @@ class StatusResponse(BaseModel):
     ollama_connected: bool
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+@router.get("/health", response_model=HealthResponse)
+async def api_health():
+    connected = True
+    try:
+        import ollama
+
+        ollama.list()
+    except Exception:
+        connected = False
+
+    doc_count = _collection.count() if _collection else 0
+    status = "healthy" if connected else "degraded"
+
+    return HealthResponse(
+        status=status,
+        ollama_connected=connected,
+        documents=doc_count,
+    )
 
 
-@app.post("/api/ingest", response_model=IngestResponse)
+@router.post("/ingest", response_model=IngestResponse)
 async def api_ingest():
     global _collection
     folder = _config.documents_dir
@@ -113,21 +139,30 @@ async def api_ingest():
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 
 
-@app.post("/api/upload", response_model=UploadResponse)
+@router.post("/upload", response_model=UploadResponse)
 async def api_upload(files: list[UploadFile]):
     global _collection
     docs_dir = Path(_config.documents_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
+    docs_dir_resolved = docs_dir.resolve()
     for file in files:
         if not file.filename:
             continue
-        ext = Path(file.filename).suffix.lower()
+        # Use only the basename to prevent path traversal.
+        safe_name = Path(file.filename).name
+        if not safe_name:
+            continue
+        ext = Path(safe_name).suffix.lower()
         if ext not in ALLOWED_EXTENSIONS:
             continue
-        dest = docs_dir / file.filename
+        dest = (docs_dir_resolved / safe_name).resolve()
+        if not str(dest).startswith(str(docs_dir_resolved) + "/"):
+            continue
         content = await file.read()
+        if len(content) > 50 * 1024 * 1024:  # 50 MB limit per file
+            continue
         dest.write_bytes(content)
         saved += 1
 
@@ -142,47 +177,66 @@ async def api_upload(files: list[UploadFile]):
     return UploadResponse(status="ok", files_saved=saved, chunks=added)
 
 
-@app.get("/api/documents", response_model=DocumentListResponse)
+@router.get("/documents", response_model=DocumentListResponse)
 async def api_list_documents():
-    docs_dir = Path(_config.documents_dir)
-    if not docs_dir.exists():
-        return DocumentListResponse(files=[])
-
     files = []
-    for p in sorted(docs_dir.iterdir()):
-        if p.is_file() and p.suffix.lower() in ALLOWED_EXTENSIONS:
+
+    # List documents from the vector store metadata (the source of truth).
+    if _collection and _collection.count() > 0:
+        result = _collection.get(include=["metadatas"])
+        sources: dict[str, int] = {}
+        for meta in result.get("metadatas") or []:
+            src = (meta or {}).get("source", "unknown")
+            sources[src] = sources.get(src, 0) + 1
+
+        docs_dir = Path(_config.documents_dir)
+        for source, chunk_count in sorted(sources.items()):
+            path = docs_dir / source
+            size_kb = round(path.stat().st_size / 1024, 1) if path.is_file() else 0
             files.append(
                 DocumentInfo(
-                    filename=p.name,
-                    size_kb=round(p.stat().st_size / 1024, 1),
+                    filename=source,
+                    size_kb=size_kb,
+                    chunk_count=chunk_count,
                 )
             )
+
     return DocumentListResponse(files=files)
 
 
-@app.delete("/api/documents/{filename}", response_model=DeleteResponse)
+@router.delete("/documents/{filename}", response_model=DeleteResponse)
 async def api_delete_document(filename: str):
     global _collection
-    docs_dir = Path(_config.documents_dir)
-    target = docs_dir / filename
+    docs_dir = Path(_config.documents_dir).resolve()
+    target = (docs_dir / filename).resolve()
 
-    if not target.is_file() or target.suffix.lower() not in ALLOWED_EXTENSIONS:
-        return DeleteResponse(status="not_found", chunks=0)
+    # Prevent path traversal — target must be inside documents dir.
+    if not str(target).startswith(str(docs_dir) + "/"):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
-    target.unlink()
+    # Delete the file from disk if it exists.
+    if target.is_file():
+        target.unlink()
 
-    remaining = load_documents(str(docs_dir))
-    _collection = vs.reset_collection(_client, _config.vector_store)
-    if remaining:
-        chunks = chunk_documents(remaining, _config.chunk)
-        added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
-    else:
-        added = 0
+    # Remove chunks with this source from the vector store.
+    if _collection and _collection.count() > 0:
+        result = _collection.get(include=["metadatas"])
+        ids_to_delete = [
+            doc_id
+            for doc_id, meta in zip(
+                result.get("ids") or [],
+                result.get("metadatas") or [],
+            )
+            if (meta or {}).get("source") == filename
+        ]
+        if ids_to_delete:
+            _collection.delete(ids=ids_to_delete)
 
-    return DeleteResponse(status="ok", chunks=added)
+    remaining_chunks = _collection.count() if _collection else 0
+    return DeleteResponse(status="ok", chunks=remaining_chunks)
 
 
-@app.post("/api/ask", response_model=AskResponse)
+@router.post("/ask", response_model=AskResponse)
 async def api_ask(body: AskRequest):
     llm_config = _config.llm
     if body.model and body.model in _config.llm.available_models:
@@ -203,7 +257,7 @@ async def api_ask(body: AskRequest):
     return AskResponse(answer=response.answer, sources=sources)
 
 
-@app.get("/api/status", response_model=StatusResponse)
+@router.get("/status", response_model=StatusResponse)
 async def api_status():
     connected = True
     try:
@@ -219,3 +273,9 @@ async def api_status():
         available_models=_config.llm.available_models,
         ollama_connected=connected,
     )
+
+
+app.include_router(router)
+
+# Serve index.html as a static file (must be last — catches all unmatched paths)
+app.mount("/", StaticFiles(directory=str(TEMPLATES_DIR), html=True), name="ui")
