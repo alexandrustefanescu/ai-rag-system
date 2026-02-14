@@ -1,20 +1,23 @@
-"""RAG engine — retrieves context from the vector store and generates answers via Ollama."""
+"""RAG engine — retrieves context from the vector store and
+generates answers via Ollama."""
 
 import logging
 
 import ollama
 
+from rag_system import vector_store as vs
 from rag_system.config import LLMConfig
 from rag_system.models import RAGResponse, RetrievedContext
-from rag_system import vector_store as vs
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a helpful assistant that answers questions based on the provided context. "
     "Use only the information from the context to answer. "
+    "The context may contain passages from multiple source documents — "
+    "focus on the passages most relevant to the question and ignore unrelated ones. "
     "If the context doesn't contain enough information, say so clearly. "
-    "Cite the source file when possible."
+    "Always cite the source file for each piece of information you use."
 )
 
 
@@ -94,29 +97,36 @@ def generate_answer(query: str, context: str, config: LLMConfig | None = None) -
     return response["message"]["content"]
 
 
+_RELEVANCE_THRESHOLD = 0.3
+
+
 def ask(
     query: str,
     collection,
     config: LLMConfig | None = None,
-    n_results: int = 3,
+    n_results: int = 5,
 ) -> RAGResponse:
-    """Full RAG pipeline: retrieve, build context, generate answer.
+    """Full RAG pipeline: retrieve, filter, build context, generate answer.
 
-    Queries the vector store for relevant chunks, builds a context
-    string, and sends it to the LLM. If no relevant documents are
-    found, returns a fallback message without calling the LLM.
+    Queries the vector store for relevant chunks, filters out low-relevance
+    results, builds a context string, and sends it to the LLM. If no
+    relevant documents are found, returns a fallback message without
+    calling the LLM.
 
     Args:
         query: The user's natural-language question.
         collection: ChromaDB collection to search.
         config: LLM settings. Uses defaults if not provided.
-        n_results: Number of context chunks to retrieve.
+        n_results: Number of context chunks to retrieve before filtering.
 
     Returns:
         A RAGResponse containing the answer and the retrieved contexts.
     """
     results = vs.query(collection, query, n_results=n_results)
     contexts = _parse_results(results)
+
+    # Filter out low-relevance chunks to reduce noise.
+    contexts = [c for c in contexts if c.relevance >= _RELEVANCE_THRESHOLD]
 
     if not contexts:
         return RAGResponse(
