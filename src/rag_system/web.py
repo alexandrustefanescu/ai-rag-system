@@ -26,7 +26,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize ChromaDB client and collection on startup."""
+    """
+    Lifespan context manager that initializes the ChromaDB client and collection for the application.
+    
+    Sets the module-level `_client` and `_collection`, logs the current number of indexed chunks, and yields control for the application's runtime.
+    """
     global _client, _collection
     _client = vs.get_client(_config.vector_store)
     _collection = vs.get_or_create_collection(_client, _config.vector_store)
@@ -102,6 +106,17 @@ class StatusResponse(BaseModel):
 
 @router.get("/health", response_model=HealthResponse)
 async def api_health():
+    """
+    Return current system health, including Ollama connectivity and document count.
+    
+    Checks whether the Ollama service is reachable and reports the vector store's indexed document/chunk count.
+    
+    Returns:
+        HealthResponse: 
+            - status: "healthy" if Ollama is reachable, "degraded" otherwise.
+            - ollama_connected: `True` if Ollama connectivity was confirmed, `False` otherwise.
+            - documents: integer count of documents/chunks indexed in the vector store.
+    """
     connected = True
     try:
         import ollama
@@ -122,6 +137,14 @@ async def api_health():
 
 @router.post("/ingest", response_model=IngestResponse)
 async def api_ingest():
+    """
+    Trigger ingestion of documents from the configured documents directory, chunk them, reset the vector store collection, and index the new chunks.
+    
+    If no documents are found in the configured directory, returns a response indicating no documents were ingested. Otherwise, replaces the current collection in the configured vector store with the newly created chunks and reports how many chunks were added.
+    
+    Returns:
+        IngestResponse: status is `"no_documents"` with `chunks` 0 when no documents were found; otherwise status is `"ok"` and `chunks` is the number of chunks added to the vector store.
+    """
     global _collection
     folder = _config.documents_dir
     documents = load_documents(folder)
@@ -141,6 +164,20 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 
 @router.post("/upload", response_model=UploadResponse)
 async def api_upload(files: list[UploadFile]):
+    """
+    Handle uploaded files: validate and save allowed files into the configured documents directory, reindex the vector store with the resulting documents, and return counts.
+    
+    Validation performed:
+    - Accepts only files with extensions .txt, .md, .pdf.
+    - Enforces a 50 MB per-file size limit.
+    - Sanitizes filenames to their basename and prevents path traversal so files are stored only under the configured documents directory.
+    
+    Parameters:
+        files (list[UploadFile]): Uploaded files to process.
+    
+    Returns:
+        UploadResponse: If no valid files are saved, returns status `"no_valid_files"` with `files_saved=0` and `chunks=0`. On success returns status `"ok"` with `files_saved` set to the number of saved files and `chunks` set to the number of chunks indexed into the vector store.
+    """
     global _collection
     docs_dir = Path(_config.documents_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +216,14 @@ async def api_upload(files: list[UploadFile]):
 
 @router.get("/documents", response_model=DocumentListResponse)
 async def api_list_documents():
+    """
+    Return a list of documents known to the vector store with per-file metadata.
+    
+    Aggregates document sources from the vector store metadata and for each source returns its filename, size in kilobytes (0 if the file is missing), and the number of indexed chunks. If the collection is empty or unavailable, returns an empty list.
+    
+    Returns:
+        DocumentListResponse: Contains a `files` list of DocumentInfo entries with `filename`, `size_kb`, and `chunk_count`.
+    """
     files = []
 
     # List documents from the vector store metadata (the source of truth).
@@ -206,6 +251,18 @@ async def api_list_documents():
 
 @router.delete("/documents/{filename}", response_model=DeleteResponse)
 async def api_delete_document(filename: str):
+    """
+    Delete a document file from the configured documents directory and remove any vector-store chunks that reference it.
+    
+    Parameters:
+        filename (str): The filename relative to the configured documents directory to delete.
+    
+    Returns:
+        DeleteResponse: Object with `status` set to "ok" and `chunks` containing the number of remaining chunks in the vector store.
+    
+    Raises:
+        HTTPException: If `filename` resolves outside the configured documents directory (invalid/path-traversal).
+    """
     global _collection
     docs_dir = Path(_config.documents_dir).resolve()
     target = (docs_dir / filename).resolve()
@@ -238,6 +295,15 @@ async def api_delete_document(filename: str):
 
 @router.post("/ask", response_model=AskResponse)
 async def api_ask(body: AskRequest):
+    """
+    Answer a question using the retrieval-augmented generation engine and return the generated answer with its supporting source contexts.
+    
+    Parameters:
+        body (AskRequest): Request containing `question` and an optional `model` override. If `model` is provided and matches one of the configured available models, the request will use that model for generation.
+    
+    Returns:
+        AskResponse: The generated `answer` string and a list of `sources`, each containing the source text, source identifier, and relevance score.
+    """
     llm_config = _config.llm
     if body.model and body.model in _config.llm.available_models:
         llm_config = _config.llm.model_copy(update={"model": body.model})
@@ -259,6 +325,16 @@ async def api_ask(body: AskRequest):
 
 @router.get("/status", response_model=StatusResponse)
 async def api_status():
+    """
+    Report current system status including document count, configured model, available models, and Ollama connectivity.
+    
+    Returns:
+        StatusResponse: 
+            documents (int): Number of documents/chunks in the vector store (0 if unavailable).
+            model (str): Configured default LLM model name.
+            available_models (list[str]): List of LLM models available from configuration.
+            ollama_connected (bool): `true` if Ollama was reachable, `false` otherwise.
+    """
     connected = True
     try:
         import ollama

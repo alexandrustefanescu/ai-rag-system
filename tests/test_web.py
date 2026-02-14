@@ -13,15 +13,24 @@ from rag_system.models import RAGResponse, RetrievedContext
 
 @asynccontextmanager
 async def _noop_lifespan(app):
+    """
+    Provide a no-op async lifespan context manager for a FastAPI app.
+    
+    Yields immediately and performs no startup or shutdown actions; intended to be used as a replacement lifespan context (for example in tests) when app lifecycle behavior should be suppressed.
+    """
     yield
 
 
 @pytest.fixture(autouse=True)
 def _tmp_config(tmp_path):
-    """Patch web module globals with a temp config and mock ChromaDB.
-
-    The lifespan is replaced with a no-op so that TestClient does not
-    create a real ChromaDB client/collection on startup.
+    """
+    Provide a temporary test configuration by patching the web module to use a temporary documents directory, mock ChromaDB client/collection, and a no-op lifespan, then restore the original state after use.
+    
+    Parameters:
+        tmp_path (pathlib.Path): Temporary filesystem path provided by pytest for creating the documents directory.
+    
+    Returns:
+        tuple: (web_module, mock_collection, mock_client) where `web_module` is the patched rag_system.web module, `mock_collection` is a MagicMock acting as the vector store collection, and `mock_client` is a MagicMock acting as the ChromaDB client.
     """
     import rag_system.web as web
 
@@ -51,7 +60,12 @@ def _tmp_config(tmp_path):
 
 @pytest.fixture
 def client():
-    """Create a TestClient with the no-op lifespan."""
+    """
+    Provide a TestClient for the rag_system.web FastAPI app using a no-op lifespan.
+    
+    Returns:
+        TestClient: A TestClient instance for rag_system.web.app (configured to not raise server exceptions).
+    """
     import rag_system.web as web
 
     with TestClient(web.app, raise_server_exceptions=False) as c:
@@ -60,7 +74,12 @@ def client():
 
 @pytest.fixture
 def docs_dir(_tmp_config):
-    """Return the temp documents directory."""
+    """
+    Provide the temporary documents directory path from the test configuration.
+    
+    Returns:
+        docs_dir (Path): Path object pointing to the temporary documents directory configured for tests.
+    """
     web = _tmp_config[0]
     return Path(web._config.documents_dir)
 
@@ -155,6 +174,16 @@ class TestIngest:
 
 class TestUpload:
     def _make_file(self, name: str, content: bytes):
+        """
+        Builds a multipart file tuple suitable for FastAPI TestClient file uploads.
+        
+        Parameters:
+            name (str): Filename to use in the multipart upload.
+            content (bytes): File bytes to include in the upload.
+        
+        Returns:
+            tuple: A tuple ("files", (name, io.BytesIO(content), "application/octet-stream")) ready to pass as `files` in a TestClient request.
+        """
         return ("files", (name, io.BytesIO(content), "application/octet-stream"))
 
     def test_upload_txt_file(self, client, docs_dir, _tmp_config):
@@ -436,6 +465,11 @@ class TestAsk:
         assert data["sources"][0]["relevance"] == 0.95
 
     def test_ask_with_model_override(self, client):
+        """
+        Verifies that supplying a `model` in the /api/v1/ask request causes the RAG engine to be invoked with that model.
+        
+        Sends a POST to the ask endpoint with a model override and asserts the patched `rag_engine.ask` call received a `config` whose `model` equals the provided model string.
+        """
         mock_response = RAGResponse(answer="Answer", contexts=[])
 
         with patch("rag_system.web.rag_engine.ask", return_value=mock_response) as mock_ask:
@@ -450,6 +484,11 @@ class TestAsk:
         assert config_used.model == "llama3.2:1b"
 
     def test_ask_with_invalid_model_uses_default(self, client):
+        """
+        Verifies that supplying an invalid model name causes the system to use the default model.
+        
+        Patches the RAG engine's ask call and asserts the forwarded configuration uses the default model "gemma3:1b".
+        """
         mock_response = RAGResponse(answer="Default model answer", contexts=[])
 
         with patch("rag_system.web.rag_engine.ask", return_value=mock_response) as mock_ask:
@@ -538,6 +577,11 @@ class TestSSLConfig:
             c.enabled = False
 
     def test_rejects_invalid_port(self):
+        """
+        Ensure SSLConfig rejects invalid port numbers.
+        
+        Raises a `pydantic.ValidationError` when the port value is outside the valid TCP port range (less than 1 or greater than 65535); tested with 0 and 70000.
+        """
         from pydantic import ValidationError
         from rag_system.config import SSLConfig
 

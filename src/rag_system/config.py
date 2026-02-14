@@ -14,6 +14,15 @@ class ChunkConfig(BaseSettings):
 
     @model_validator(mode="after")
     def _overlap_less_than_size(self) -> "ChunkConfig":
+        """
+        Validate that the chunk overlap is less than the chunk size.
+        
+        Raises:
+            ValueError: If `overlap` is greater than or equal to `size`. Message: "overlap (<overlap>) must be less than size (<size>)"
+        
+        Returns:
+            ChunkConfig: The same instance (`self`) when validation succeeds.
+        """
         if self.overlap >= self.size:
             msg = f"overlap ({self.overlap}) must be less than size ({self.size})"
             raise ValueError(msg)
