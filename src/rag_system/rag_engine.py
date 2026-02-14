@@ -69,19 +69,16 @@ def _build_context_string(contexts: list[RetrievedContext]) -> str:
 
 
 def generate_answer(query: str, context: str, config: LLMConfig | None = None) -> str:
-    """Generate an answer using the Ollama LLM.
-
-    Sends a system prompt and a user prompt (context + question) to
-    the configured Ollama model and returns the generated text.
-
-    Args:
-        query: The user's question.
-        context: Pre-formatted context string from retrieved documents.
-        config: LLM settings (model, temperature, max_tokens).
-            Uses defaults if not provided.
-
+    """
+    Generate an answer to a question using the configured Ollama model.
+    
+    Parameters:
+        query (str): The user's question.
+        context (str): Preformatted context string composed from retrieved documents.
+        config (LLMConfig | None): Optional LLM settings (model, temperature, max_tokens). Defaults to a new LLMConfig when omitted.
+    
     Returns:
-        The model's generated answer as a string.
+        str: The generated answer text from the model.
     """
     cfg = config or LLMConfig()
     user_prompt = f"Context:\n{context}\n\nQuestion: {query}"

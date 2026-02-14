@@ -13,12 +13,16 @@ set -euo pipefail
 INSTALL_DIR="${RAG_INSTALL_DIR:-$HOME/ai-rag-system}"
 IMAGE="alexandrustefanescu/ai-rag-system:latest"
 
+# info prints a blue '[INFO]' prefix followed by the provided message to stdout.
 info()  { printf '\033[1;34m[INFO]\033[0m  %s\n' "$1"; }
+# ok prints a green "[OK]" prefix followed by the provided message to stdout.
 ok()    { printf '\033[1;32m[OK]\033[0m    %s\n' "$1"; }
+# warn prints a yellow `[WARN]` prefix followed by the provided message to stdout.
 warn()  { printf '\033[1;33m[WARN]\033[0m  %s\n' "$1"; }
+# err prints an error message to stderr with a red "[ERROR]" prefix and exits the script with status 1.
 err()   { printf '\033[1;31m[ERROR]\033[0m %s\n' "$1" >&2; exit 1; }
 
-# ── Detect OS ────────────────────────────────────────────────────────────────
+# detect_os determines the current operating system and sets the `OS_ID` and `OS_ID_LIKE` variables (e.g., `debian`, `ubuntu`, `macos`, or `unknown`).
 
 detect_os() {
     if [ -f /etc/os-release ]; then
@@ -34,6 +38,7 @@ detect_os() {
     fi
 }
 
+# is_debian_based returns success (exit status 0) when the detected OS is Debian, Ubuntu, Raspbian, or identifies a Debian-like family via OS_ID_LIKE; returns non-zero otherwise.
 is_debian_based() {
     case "$OS_ID" in
         debian|ubuntu|raspbian) return 0 ;;
@@ -44,6 +49,7 @@ is_debian_based() {
     return 1
 }
 
+# is_fedora_based returns success (exit code 0) when the detected OS is Fedora, CentOS, RHEL, Rocky, AlmaLinux, or when OS_ID_LIKE contains "fedora" or "rhel"; otherwise returns non-zero.
 is_fedora_based() {
     case "$OS_ID" in
         fedora|centos|rhel|rocky|alma) return 0 ;;
@@ -63,7 +69,9 @@ if [ "$(id -u)" -eq 0 ] && [ ! -f /.dockerenv ]; then
     err "Do not run this script as root. Run as a normal user — sudo is used only where needed."
 fi
 
-# ── Install Docker if missing ───────────────────────────────────────────────
+# install_docker_linux installs Docker on a Linux host using the official get.docker.com script, adds the current user to the `docker` group if needed, and enables and starts the Docker service.
+# 
+# Adds the current user to the `docker` group (may require logout/login or `newgrp docker` to take effect) and uses systemctl to enable and start the docker daemon.
 
 install_docker_linux() {
     info "Installing Docker via official install script..."
@@ -79,6 +87,7 @@ install_docker_linux() {
     sudo systemctl enable --now docker
 }
 
+# install_docker_macos installs Docker Desktop via Homebrew if present, opens the app so the user can finish the setup and exits; if Homebrew is not available, it prints an error directing the user to Docker Desktop's installation page.
 install_docker_macos() {
     if command -v brew >/dev/null 2>&1; then
         info "Installing Docker Desktop via Homebrew..."
@@ -151,7 +160,7 @@ if [ -f /proc/meminfo ]; then
     fi
 fi
 
-# ── Check for port conflicts ────────────────────────────────────────────────
+# check_port checks whether the given TCP port is in use and emits a warning if a listening service is found.
 
 check_port() {
     if command -v ss >/dev/null 2>&1; then

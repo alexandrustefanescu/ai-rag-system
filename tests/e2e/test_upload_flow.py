@@ -20,6 +20,16 @@ class TestUpload:
         base_url: str,
         tmp_path: Path,
     ):
+        """
+        Uploads a temporary text file through the hidden file input and verifies the upload button shows progress feedback then resets.
+        
+        Creates a temporary file named "test_doc.txt", sets it on the hidden file input selector "#file-input", then asserts that the upload button ("#upload-btn") first contains the substring "chunks!" and later has the exact text "Upload Documents".
+        
+        Parameters:
+            page (Page): Playwright page used to navigate and interact with the app.
+            base_url (str): Base URL of the application under test.
+            tmp_path (Path): Temporary directory provided by pytest for creating the test file.
+        """
         page.goto(base_url)
 
         # Create a test file
@@ -46,6 +56,11 @@ class TestUpload:
         base_url: str,
         tmp_path: Path,
     ):
+        """
+        Checks that the document count updates to indicate chunked documents after a file upload.
+        
+        Creates a temporary text file, uploads it via the hidden '#file-input', waits briefly for the upload/status to refresh, and asserts that the '#doc-count' element contains the substring "chunks".
+        """
         page.goto(base_url)
 
         test_file = tmp_path / "sample.txt"
@@ -65,6 +80,13 @@ class TestUpload:
         base_url: str,
         tmp_path: Path,
     ):
+        """
+        Verifies that an uploaded file appears in the application's Manage panel.
+        
+        Navigates to the base URL, creates and uploads a temporary file named "visible_doc.txt",
+        opens the Manage panel, asserts the panel is marked open, and asserts the uploaded
+        file name is visible in the document list.
+        """
         page.goto(base_url)
 
         test_file = tmp_path / "visible_doc.txt"

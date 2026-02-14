@@ -12,6 +12,12 @@ from rag_system.text_chunker import chunk_documents
 
 
 def _setup_logging(verbose: bool = False) -> None:
+    """
+    Configure root logging.
+    
+    Parameters:
+        verbose (bool): If True, set logging level to DEBUG; otherwise set level to INFO.
+    """
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,

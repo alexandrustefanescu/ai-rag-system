@@ -30,6 +30,7 @@ for arg in "$@"; do
     esac
 done
 
+# log prefixes a message with a timestamp, echoes it to stdout, and appends it to LOG_FILE when USE_LOG is true.
 log() {
     local timestamp
     timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -42,6 +43,9 @@ log() {
     echo "$message"
 }
 
+# check_health performs health checks for the RAG app, Ollama, and (if available) Docker containers, logs the outcomes, and returns an exit code indicating overall health.
+# 
+# It logs OK/WARN/FAIL for each subsystem and returns 0 when all checks are healthy or only warnings are present, and 1 if any check fails.
 check_health() {
     local exit_code=0
 

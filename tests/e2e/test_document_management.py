@@ -11,6 +11,11 @@ pytestmark = pytest.mark.e2e
 
 class TestDocumentPanel:
     def test_manage_button_opens_panel(self, page: Page, base_url: str):
+        """
+        Verify that clicking the "Manage" control opens the document panel.
+        
+        Asserts that the element with id "doc-panel" has a class matching "open".
+        """
         page.goto(base_url)
         page.get_by_text("Manage").click()
         expect(page.locator("#doc-panel")).to_have_class(re.compile("open"))
@@ -24,6 +29,11 @@ class TestDocumentPanel:
         expect(page.locator("#doc-panel")).not_to_have_class(re.compile("open"))
 
     def test_empty_panel_message(self, page: Page, base_url: str):
+        """
+        Check that the document management panel displays an empty-state message when no documents are present.
+        
+        Opens the panel and asserts an element with class "panel-empty" is visible within 5 seconds.
+        """
         page.goto(base_url)
         page.get_by_text("Manage").click()
 
@@ -35,6 +45,11 @@ class TestDocumentPanel:
         base_url: str,
         tmp_path: Path,
     ):
+        """
+        Verify that a file uploaded via the file input appears in the document management panel with the expected filename and a size indicator containing "chunks".
+        
+        This test uploads a temporary file, opens the panel, and asserts the uploaded document is visible, its name contains "panel_test.txt", and its size text contains "chunks".
+        """
         page.goto(base_url)
 
         # Upload a file first
@@ -52,6 +67,11 @@ class TestDocumentPanel:
         expect(page.locator(".doc-size")).to_contain_text("chunks")
 
     def test_delete_document(self, page: Page, base_url: str, tmp_path: Path):
+        """
+        End-to-end test that uploads a document, deletes it from the document panel, and verifies its removal.
+        
+        Creates a temporary file named `to_delete.txt`, uploads it via the page file input, opens the document management panel, accepts the confirmation dialog, clicks the delete control for that specific document, and asserts the document is no longer listed.
+        """
         page.goto(base_url)
 
         # Upload a file

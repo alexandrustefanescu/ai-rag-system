@@ -24,6 +24,11 @@ class TestModelSelector:
         expect(options).to_have_count(2)
 
     def test_model_options_contain_configured_models(self, page: Page, base_url: str):
+        """
+        Verifies the model selector contains exactly one option for each configured model.
+        
+        Checks that the #model-select element includes one option with value "gemma3:1b" and one option with value "llama3.2:1b".
+        """
         page.goto(base_url)
         page.wait_for_timeout(2000)
 
@@ -33,12 +38,22 @@ class TestModelSelector:
             expect(select.locator(f"option[value='{model}']")).to_have_count(1)
 
     def test_default_model_selected(self, page: Page, base_url: str):
+        """
+        Check that the model selector defaults to "gemma3:1b" after the page loads.
+        
+        Asserts that the #model-select element's value is "gemma3:1b".
+        """
         page.goto(base_url)
         page.wait_for_timeout(2000)
 
         expect(page.locator("#model-select")).to_have_value("gemma3:1b")
 
     def test_can_change_model(self, page: Page, base_url: str):
+        """
+        Changes the selected model in the model dropdown and verifies the selection updates.
+        
+        Selects the option with value "llama3.2:1b" in the `#model-select` element and asserts the element's value becomes "llama3.2:1b".
+        """
         page.goto(base_url)
         page.wait_for_timeout(2000)
 

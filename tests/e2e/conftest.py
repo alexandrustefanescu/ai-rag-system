@@ -12,6 +12,12 @@ import uvicorn
 
 
 def _find_free_port() -> int:
+    """
+    Get an available TCP port assigned by the operating system.
+    
+    Returns:
+        port (int): An available TCP port number assigned by the OS.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -19,7 +25,14 @@ def _find_free_port() -> int:
 
 @pytest.fixture(scope="session")
 def _mock_ollama():
-    """Patch ollama.chat and ollama.list for the entire test session."""
+    """
+    Patch Ollama's chat and list calls used by the application and provide the chat mock to tests.
+    
+    This fixture replaces `ollama.chat` and `ollama.list` (including usage inside rag_system.rag_engine) with MagicMock objects that simulate a chat response and a model list for the duration of the test session.
+    
+    Returns:
+        MagicMock: The mock used for `ollama.chat`, configured to return a predictable chat response.
+    """
     mock_chat = MagicMock(
         return_value={"message": {"content": "This is a mocked answer from the LLM."}}
     )
@@ -42,7 +55,14 @@ def _mock_ollama():
 
 @pytest.fixture(scope="session")
 def _tmp_dirs():
-    """Create temporary documents and ChromaDB directories."""
+    """
+    Provide temporary directories for documents and ChromaDB for use by tests.
+    
+    Returns:
+        tuple[str, str]: A tuple (docs_dir, db_dir) containing filesystem paths to the temporary
+        documents directory and the temporary ChromaDB directory. Both directories are removed
+        when the fixture context exits.
+    """
     with (
         tempfile.TemporaryDirectory() as docs_dir,
         tempfile.TemporaryDirectory() as db_dir,
@@ -52,7 +72,13 @@ def _tmp_dirs():
 
 @pytest.fixture(scope="session")
 def live_server(_mock_ollama, _tmp_dirs):
-    """Start a real uvicorn server in a background thread."""
+    """
+    Provide a live FastAPI server URL backed by a real uvicorn process for tests.
+    
+    Starts a uvicorn server in a background thread with environment variables set to use the provided temporary document and database directories, yields the server's base URL for test use, and ensures the server is stopped after the test session.
+    Returns:
+        base_url (str): The server base URL, e.g. "http://127.0.0.1:<port>".
+    """
     docs_dir, db_dir = _tmp_dirs
     port = _find_free_port()
 
@@ -99,10 +125,27 @@ def live_server(_mock_ollama, _tmp_dirs):
 
 @pytest.fixture(scope="session")
 def base_url(live_server):
+    """
+    Expose the live server's base URL to tests.
+    
+    Parameters:
+        live_server (str): The base URL of the running test server, e.g. "http://127.0.0.1:12345".
+    
+    Returns:
+        base_url (str): The same base URL string provided by the `live_server` fixture.
+    """
     return live_server
 
 
 @pytest.fixture
 def docs_dir(_tmp_dirs):
-    """Return the temporary documents directory path."""
+    """
+    Get the temporary documents directory path.
+    
+    Parameters:
+        _tmp_dirs (tuple): A tuple where the first element is the temporary documents directory path (string).
+    
+    Returns:
+        docs_dir (Path): A Path pointing to the temporary documents directory.
+    """
     return Path(_tmp_dirs[0])
