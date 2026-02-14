@@ -8,3 +8,7 @@ chroma_db/
 .pytest_cache/
 .ruff_cache/
 .coverage
+certs/
+backups/
+.DS_Store
+logs/

@@ -7,21 +7,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install uv for fast dependency management.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir uv
 
 # Copy dependency files first (better layer caching).
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 
 # Install dependencies (without the project itself).
 RUN uv pip install --system --no-cache-dir .
 
-# Copy source code.
+# Copy source code and cert generation script.
 COPY src/ src/
 COPY documents/ documents/
+COPY scripts/generate-certs.sh scripts/generate-certs.sh
 
 # Install the project.
 RUN uv pip install --system --no-cache-dir -e .
 
-EXPOSE 8000
+# Generate self-signed certs at build time (can be overridden via volume mount).
+RUN bash scripts/generate-certs.sh ./certs
 
-CMD ["uvicorn", "rag_system.web:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8443
+
+CMD ["uvicorn", "rag_system.web:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "./certs/key.pem", "--ssl-certfile", "./certs/cert.pem"]
