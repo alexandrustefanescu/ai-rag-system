@@ -6,15 +6,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install openssl for runtime TLS certificate generation.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv for fast dependency management.
 RUN pip install --no-cache-dir uv
 
 # Copy dependency files first (better layer caching).
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 
 # Install only third-party dependencies (skip building the local package
 # since src/rag_system isn't present yet — avoids hatchling build failure).
-RUN uv pip install --system --no-cache-dir --no-install-project .
+RUN uv sync --frozen --no-install-project
 
 # Copy source code and scripts.
 COPY src/ src/
@@ -25,10 +29,11 @@ COPY scripts/entrypoint.sh scripts/entrypoint.sh
 # Install the local package now that source is present.
 RUN uv pip install --system --no-cache-dir -e .
 
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app
-
-USER appuser
 
 EXPOSE 8443
 
