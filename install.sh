@@ -136,7 +136,7 @@ ok "Docker is ready ($(docker --version))"
 
 # ── Check available disk space (need ~4 GB for images + models) ─────────────
 
-available_gb=$(df -BG "$HOME" 2>/dev/null | awk 'NR==2 {gsub(/G/,"",$4); print $4}' || echo "")
+available_gb=$(df -k "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
 if [ -n "$available_gb" ] && [ "$available_gb" -lt 4 ] 2>/dev/null; then
     warn "Only ${available_gb}GB disk space available. The system needs ~4 GB (images + AI models)."
 fi
