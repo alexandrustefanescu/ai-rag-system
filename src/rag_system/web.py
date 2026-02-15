@@ -130,7 +130,7 @@ async def api_health(collection=Depends(get_collection)):
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def api_ingest(
+def api_ingest(
     request: Request,
     collection=Depends(get_collection),
     client=Depends(get_client),
@@ -153,7 +153,7 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def api_upload(
+def api_upload(
     files: list[UploadFile],
     request: Request,
     collection=Depends(get_collection),
@@ -175,9 +175,11 @@ async def api_upload(
         if ext not in ALLOWED_EXTENSIONS:
             continue
         dest = (docs_dir_resolved / safe_name).resolve()
-        if not str(dest).startswith(str(docs_dir_resolved) + "/"):
+        try:
+            dest.relative_to(docs_dir_resolved)
+        except ValueError:
             continue
-        content = await file.read()
+        content = file.file.read()
         if len(content) > 50 * 1024 * 1024:  # 50 MB limit per file
             continue
         dest.write_bytes(content)
@@ -228,7 +230,9 @@ async def api_delete_document(filename: str, collection=Depends(get_collection))
     target = (docs_dir / filename).resolve()
 
     # Prevent path traversal — target must be inside documents dir.
-    if not str(target).startswith(str(docs_dir) + "/"):
+    try:
+        target.relative_to(docs_dir)
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     # Delete the file from disk if it exists.
@@ -254,7 +258,13 @@ async def api_delete_document(filename: str, collection=Depends(get_collection))
 
 
 @router.post("/ask", response_model=AskResponse)
-async def api_ask(body: AskRequest, collection=Depends(get_collection)):
+def api_ask(body: AskRequest, collection=Depends(get_collection)):
+    if collection is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Vector store not initialized. Ingest documents first.",
+        )
+
     llm_config = _config.llm
     if body.model and body.model in _config.llm.available_models:
         llm_config = _config.llm.model_copy(update={"model": body.model})

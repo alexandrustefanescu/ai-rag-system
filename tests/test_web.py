@@ -373,6 +373,8 @@ class TestDeleteDocument:
 
         resp = client.delete("/api/v1/documents/target.txt")
 
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
         collection.delete.assert_called_once_with(ids=["c1", "c3"])
 
     def test_delete_file_only_on_disk_no_chunks(self, client, docs_dir, _tmp_config):
