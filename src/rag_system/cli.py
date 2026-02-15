@@ -4,11 +4,11 @@ import argparse
 import logging
 import sys
 
-from rag_system.config import AppConfig, ChunkConfig, LLMConfig
+from rag_system import rag_engine
+from rag_system import vector_store as vs
+from rag_system.config import AppConfig, LLMConfig
 from rag_system.document_loader import load_documents
 from rag_system.text_chunker import chunk_documents
-from rag_system import vector_store as vs
-from rag_system import rag_engine
 
 
 def _setup_logging(verbose: bool = False) -> None:
@@ -116,7 +116,7 @@ def main() -> None:
     # chat
     chat_p = subparsers.add_parser("chat", help="Start interactive chat")
     chat_p.add_argument(
-        "--model", type=str, default="tinyllama", help="Ollama model name"
+        "--model", type=str, default="gemma3:1b", help="Ollama model name"
     )
 
     args = parser.parse_args()

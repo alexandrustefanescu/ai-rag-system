@@ -103,11 +103,16 @@ class TestLoadDocuments:
         (tmp_path / "good.txt").write_text("valid content", encoding="utf-8")
         (tmp_path / "bad.txt").write_text("will fail", encoding="utf-8")
 
-        with patch("rag_system.document_loader.LOADERS", {
-            ".txt": lambda p: (_ for _ in ()).throw(RuntimeError("boom"))
-            if p.name == "bad.txt"
-            else p.read_text(encoding="utf-8"),
-        }):
+        with patch(
+            "rag_system.document_loader.LOADERS",
+            {
+                ".txt": lambda p: (
+                    (_ for _ in ()).throw(RuntimeError("boom"))
+                    if p.name == "bad.txt"
+                    else p.read_text(encoding="utf-8")
+                ),
+            },
+        ):
             docs = load_documents(tmp_path)
 
         assert len(docs) == 1

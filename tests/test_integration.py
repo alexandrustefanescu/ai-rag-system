@@ -1,14 +1,12 @@
 """Integration tests — end-to-end ingestion + retrieval pipeline."""
 
-import tempfile
-
 import pytest
 
+from rag_system import vector_store as vs
 from rag_system.config import VectorStoreConfig
 from rag_system.document_loader import load_documents
 from rag_system.models import Chunk
 from rag_system.text_chunker import chunk_documents
-from rag_system import vector_store as vs
 
 
 @pytest.fixture
@@ -115,9 +113,18 @@ class TestIngestionPipeline:
         collection = vs.reset_collection(client, tmp_vs_config)
 
         chunks = [
-            Chunk(text="Cats are fluffy domesticated animals that purr.", metadata={"source": "doc0.txt"}),
-            Chunk(text="The stock market experienced a downturn in Q3.", metadata={"source": "doc1.txt"}),
-            Chunk(text="Dogs are loyal pets that love to play fetch.", metadata={"source": "doc2.txt"}),
+            Chunk(
+                text="Cats are fluffy domesticated animals that purr.",
+                metadata={"source": "doc0.txt"},
+            ),
+            Chunk(
+                text="The stock market experienced a downturn in Q3.",
+                metadata={"source": "doc1.txt"},
+            ),
+            Chunk(
+                text="Dogs are loyal pets that love to play fetch.",
+                metadata={"source": "doc2.txt"},
+            ),
         ]
         vs.add_chunks(collection, chunks)
 
