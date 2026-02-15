@@ -88,6 +88,22 @@ class TestLLMConfig:
         with pytest.raises(ValidationError):
             LLMConfig(max_tokens=0)
 
+    def test_available_models_from_json_string(self) -> None:
+        c = LLMConfig(available_models='["a", "b"]')
+        assert c.available_models == ["a", "b"]
+
+    def test_available_models_from_csv_string(self) -> None:
+        c = LLMConfig(available_models="gemma3:1b, llama3.2:1b")
+        assert c.available_models == ["gemma3:1b", "llama3.2:1b"]
+
+    def test_available_models_from_list(self) -> None:
+        c = LLMConfig(available_models=["x", "y"])
+        assert c.available_models == ["x", "y"]
+
+    def test_available_models_csv_strips_whitespace(self) -> None:
+        c = LLMConfig(available_models=" a , b , c ")
+        assert c.available_models == ["a", "b", "c"]
+
 
 class TestAppConfig:
     def test_defaults(self) -> None:

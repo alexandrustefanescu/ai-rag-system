@@ -1,6 +1,8 @@
 """Centralized configuration for the RAG system."""
 
-from pydantic import Field, model_validator
+import json
+
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +43,21 @@ class LLMConfig(BaseSettings):
     available_models: list[str] = Field(
         default=["gemma3:1b", "llama3.2:1b"],
     )
+
+    @field_validator("available_models", mode="before")
+    @classmethod
+    def _parse_available_models(cls, v: object) -> list[str]:
+        """Accept a JSON array string or comma-separated string from env vars."""
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                parsed = [item.strip() for item in v.split(",") if item.strip()]
+            if not isinstance(parsed, list):
+                return [str(parsed)]
+            return [str(item) for item in parsed]
+        return v  # type: ignore[return-value]
+
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=512, gt=0)
 
