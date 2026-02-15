@@ -59,8 +59,10 @@ info "Detected OS: $OS_ID"
 
 # ── Prevent running as root (unless inside Docker) ──────────────────────────
 
-if [ "$(id -u)" -eq 0 ] && [ ! -f /.dockerenv ]; then
-    err "Do not run this script as root. Run as a normal user — sudo is used only where needed."
+if [ ! -f /.dockerenv ]; then
+    if [ "$(id -u)" -eq 0 ] || [ -n "${SUDO_USER:-}" ] || [ -n "${SUDO_UID:-}" ]; then
+        err "Do not run this script as root or via sudo. Run as a normal user — sudo is used only where needed."
+    fi
 fi
 
 # ── Install Docker if missing ───────────────────────────────────────────────
