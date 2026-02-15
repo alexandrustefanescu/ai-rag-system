@@ -543,3 +543,118 @@ class TestSSLConfig:
             SSLConfig(port=0)
         with pytest.raises(ValidationError):
             SSLConfig(port=70000)
+
+
+# ---------- Additional security and edge case tests ----------
+
+
+class TestUploadSecurity:
+    def test_empty_filename_rejected(self, client, _tmp_config):
+        """Test that files with empty filenames are rejected."""
+        resp = client.post(
+            "/api/v1/upload",
+            files=[("files", ("", b"content", "text/plain"))],
+        )
+        assert resp.json()["files_saved"] == 0
+
+    def test_upload_with_no_files(self, client):
+        """Test upload endpoint with no files."""
+        resp = client.post("/api/v1/upload", files=[])
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "no_valid_files"
+
+    def test_pdf_file_upload(self, client, docs_dir, _tmp_config):
+        """Test that PDF files are accepted."""
+        with patch("rag_system.web.vs") as mock_vs:
+            mock_vs.reset_collection.return_value = _tmp_config[1]
+            mock_vs.add_chunks.return_value = 1
+            resp = client.post(
+                "/api/v1/upload",
+                files=[("files", ("test.pdf", b"%PDF-1.4 fake pdf", "application/pdf"))],
+            )
+        assert resp.json()["files_saved"] == 1
+
+    def test_whitespace_only_filename(self, client):
+        """Test files with whitespace-only names are rejected."""
+        resp = client.post(
+            "/api/v1/upload",
+            files=[("files", ("   ", b"content", "text/plain"))],
+        )
+        assert resp.json()["files_saved"] == 0
+
+
+class TestDeleteDocumentSecurity:
+    def test_delete_path_traversal_blocked(self, client):
+        """Test that path traversal attempts are blocked."""
+        resp = client.delete("/api/v1/documents/../../../etc/passwd")
+        assert resp.status_code == 400
+        assert "Invalid filename" in resp.json()["detail"]
+
+    def test_delete_absolute_path_blocked(self, client, _tmp_config):
+        """Test that absolute paths are blocked."""
+        web = _tmp_config[0]
+        docs_dir = web._config.documents_dir
+        resp = client.delete(f"/api/v1/documents/{docs_dir}/file.txt")
+        assert resp.status_code == 400
+
+
+class TestAskValidation:
+    def test_ask_requires_question(self, client):
+        """Test that question field is required."""
+        resp = client.post("/api/v1/ask", json={})
+        assert resp.status_code == 422
+
+    def test_ask_invalid_json(self, client):
+        """Test handling of invalid JSON."""
+        resp = client.post(
+            "/api/v1/ask",
+            data="not json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+
+class TestIngestEdgeCases:
+    def test_ingest_with_empty_documents_dir(self, client, docs_dir):
+        """Test ingestion when documents directory is empty."""
+        resp = client.post("/api/v1/ingest")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "no_documents"
+
+    def test_ingest_updates_collection(self, client, docs_dir, _tmp_config):
+        """Test that ingestion resets and updates the collection."""
+        (docs_dir / "doc1.txt").write_text("First ingestion content for testing")
+
+        with patch("rag_system.web.vs") as mock_vs:
+            mock_vs.reset_collection.return_value = _tmp_config[1]
+            mock_vs.add_chunks.return_value = 1
+            resp1 = client.post("/api/v1/ingest")
+
+        assert resp1.json()["chunks"] == 1
+        mock_vs.reset_collection.assert_called_once()
+
+
+class TestHealthEdgeCases:
+    def test_health_with_none_collection(self, client, _tmp_config):
+        """Test health endpoint when collection is None."""
+        web = _tmp_config[0]
+        web.app.state.chroma_collection = None
+
+        with patch("ollama.list"):
+            resp = client.get("/api/v1/health")
+
+        assert resp.status_code == 200
+        assert resp.json()["documents"] == 0
+
+
+class TestStatusEdgeCases:
+    def test_status_with_none_collection(self, client, _tmp_config):
+        """Test status endpoint when collection is None."""
+        web = _tmp_config[0]
+        web.app.state.chroma_collection = None
+
+        with patch("ollama.list"):
+            resp = client.get("/api/v1/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["documents"] == 0

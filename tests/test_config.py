@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from rag_system.config import AppConfig, ChunkConfig, LLMConfig, VectorStoreConfig
+from rag_system.config import AppConfig, ChunkConfig, LLMConfig, SSLConfig, VectorStoreConfig
 
 
 class TestChunkConfig:
@@ -120,3 +120,100 @@ class TestAppConfig:
         )
         assert c.llm.model == "llama3"
         assert c.chunk.size == 1000
+
+    def test_includes_ssl_config(self) -> None:
+        c = AppConfig()
+        assert isinstance(c.ssl, SSLConfig)
+        assert c.ssl.enabled is True
+
+    def test_is_frozen(self) -> None:
+        c = AppConfig()
+        with pytest.raises(ValidationError):
+            c.documents_dir = "/new/path"
+
+    def test_custom_documents_dir(self) -> None:
+        c = AppConfig(documents_dir="/custom/docs")
+        assert c.documents_dir == "/custom/docs"
+
+
+class TestSSLConfigValidation:
+    def test_allows_valid_port_range(self) -> None:
+        c1 = SSLConfig(port=1)
+        assert c1.port == 1
+
+        c2 = SSLConfig(port=65535)
+        assert c2.port == 65535
+
+        c3 = SSLConfig(port=443)
+        assert c3.port == 443
+
+    def test_custom_cert_paths(self) -> None:
+        c = SSLConfig(certfile="/custom/cert.pem", keyfile="/custom/key.pem")
+        assert c.certfile == "/custom/cert.pem"
+        assert c.keyfile == "/custom/key.pem"
+
+    def test_ssl_can_be_disabled(self) -> None:
+        c = SSLConfig(enabled=False)
+        assert c.enabled is False
+
+
+class TestLLMConfigValidation:
+    def test_available_models_default(self) -> None:
+        c = LLMConfig()
+        assert "gemma3:1b" in c.available_models
+        assert "llama3.2:1b" in c.available_models
+
+    def test_custom_available_models(self) -> None:
+        c = LLMConfig(available_models=["model1", "model2"])
+        assert c.available_models == ["model1", "model2"]
+
+    def test_accepts_fractional_temperature(self) -> None:
+        c = LLMConfig(temperature=0.7)
+        assert c.temperature == 0.7
+
+    def test_accepts_large_max_tokens(self) -> None:
+        c = LLMConfig(max_tokens=4096)
+        assert c.max_tokens == 4096
+
+    def test_rejects_negative_max_tokens(self) -> None:
+        with pytest.raises(ValidationError):
+            LLMConfig(max_tokens=-1)
+
+
+class TestVectorStoreConfigValidation:
+    def test_custom_embedding_model(self) -> None:
+        c = VectorStoreConfig(embedding_model="custom-model-v2")
+        assert c.embedding_model == "custom-model-v2"
+
+    def test_custom_collection_name(self) -> None:
+        c = VectorStoreConfig(collection_name="my_collection")
+        assert c.collection_name == "my_collection"
+
+    def test_custom_db_path(self) -> None:
+        c = VectorStoreConfig(db_path="/data/chroma")
+        assert c.db_path == "/data/chroma"
+
+    def test_rejects_negative_query_results(self) -> None:
+        with pytest.raises(ValidationError):
+            VectorStoreConfig(query_results=-1)
+
+    def test_rejects_negative_batch_size(self) -> None:
+        with pytest.raises(ValidationError):
+            VectorStoreConfig(batch_size=-1)
+
+
+class TestChunkConfigEdgeCases:
+    def test_maximum_overlap_less_than_size(self) -> None:
+        """Test that overlap can be size - 1."""
+        c = ChunkConfig(size=100, overlap=99)
+        assert c.overlap == 99
+
+    def test_large_chunk_size(self) -> None:
+        c = ChunkConfig(size=10000, overlap=1000)
+        assert c.size == 10000
+        assert c.overlap == 1000
+
+    def test_minimal_chunk_size(self) -> None:
+        c = ChunkConfig(size=1, overlap=0)
+        assert c.size == 1
+        assert c.overlap == 0

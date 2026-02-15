@@ -223,3 +223,73 @@ class TestMain:
 
         cfg = mock_chat.call_args[0][0]
         assert cfg.llm.model == "gemma3:1b"
+
+
+class TestChatEdgeCases:
+    @patch("rag_system.cli.rag_engine")
+    @patch("builtins.input", side_effect=["What is Python?", "Tell me more", "quit"])
+    @patch("rag_system.cli.vs")
+    def test_multiple_questions(self, mock_vs, mock_input, mock_engine) -> None:
+        """Test multiple questions in one session."""
+        mock_collection = MagicMock()
+        mock_collection.count.return_value = 10
+        mock_vs.get_or_create_collection.return_value = mock_collection
+        mock_engine.ask.return_value = RAGResponse(answer="Answer")
+
+        chat()
+
+        assert mock_engine.ask.call_count == 2
+
+    @patch("builtins.input", side_effect=["   ", "   ", "quit"])
+    @patch("rag_system.cli.vs")
+    def test_multiple_empty_inputs(self, mock_vs, mock_input) -> None:
+        """Test that multiple empty inputs are skipped."""
+        mock_collection = MagicMock()
+        mock_collection.count.return_value = 5
+        mock_vs.get_or_create_collection.return_value = mock_collection
+
+        chat()
+
+        # Should skip empty inputs and eventually quit
+        assert mock_input.call_count == 3
+
+
+class TestIngestEdgeCases:
+    @patch("rag_system.cli.vs")
+    @patch("rag_system.cli.chunk_documents")
+    @patch("rag_system.cli.load_documents")
+    def test_ingest_with_many_documents(self, mock_load, mock_chunk, mock_vs) -> None:
+        """Test ingestion with many documents."""
+        mock_load.return_value = [
+            Document(content=f"doc{i}", metadata={"source": f"file{i}.txt"})
+            for i in range(100)
+        ]
+        mock_chunk.return_value = [MagicMock() for _ in range(500)]
+        mock_vs.add_chunks.return_value = 500
+
+        ingest("/many/docs")
+
+        mock_vs.add_chunks.assert_called_once()
+        assert len(mock_chunk.return_value) == 500
+
+
+class TestMainEdgeCases:
+    @patch("rag_system.cli.chat")
+    @patch("rag_system.cli._setup_logging")
+    def test_chat_with_verbose_and_model(self, mock_logging, mock_chat) -> None:
+        """Test chat command with both verbose and model flags."""
+        with patch("sys.argv", ["rag_system", "-v", "chat", "--model", "llama3"]):
+            main()
+
+        mock_logging.assert_called_once_with(True)
+        cfg = mock_chat.call_args[0][0]
+        assert cfg.llm.model == "llama3"
+
+    @patch("rag_system.cli.ingest")
+    @patch("rag_system.cli._setup_logging")
+    def test_ingest_with_custom_folder(self, mock_logging, mock_ingest) -> None:
+        """Test ingest with custom folder path."""
+        with patch("sys.argv", ["rag_system", "ingest", "--folder", "/custom/path"]):
+            main()
+
+        mock_ingest.assert_called_once_with("/custom/path")
