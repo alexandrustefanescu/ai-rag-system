@@ -113,14 +113,16 @@ class TestAsk:
         assert "No relevant documents" in response.answer
         assert response.contexts == []
 
+    @patch("rag_system.rag_engine.generate_answer")
     @patch("rag_system.rag_engine.vs.query")
-    def test_filters_low_relevance_results(self, mock_query) -> None:
+    def test_filters_low_relevance_results(self, mock_query, mock_generate) -> None:
         """Test that results below the relevance threshold are filtered out."""
         mock_query.return_value = {
             "documents": [["High relevance doc", "Low relevance doc"]],
             "metadatas": [[{"source": "high.txt"}, {"source": "low.txt"}]],
             "distances": [[0.1, 0.9]],  # 0.9 distance = 0.1 relevance (below 0.3)
         }
+        mock_generate.return_value = "Answer from high relevance doc"
         collection = MagicMock()
         response = ask("test query", collection)
 
@@ -178,7 +180,9 @@ class TestAsk:
 
         mock_generate.assert_called_once()
         call_args = mock_generate.call_args
-        config_arg = call_args[0][2] if len(call_args[0]) > 2 else call_args.kwargs.get("config")
+        config_arg = (
+            call_args[0][2] if len(call_args[0]) > 2 else call_args.kwargs.get("config")
+        )
         assert config_arg.model == "custom-model"
 
 
@@ -222,7 +226,9 @@ class TestBuildContextStringEdgeCases:
     def test_preserves_newlines_in_text(self) -> None:
         """Test that newlines in context text are preserved."""
         ctxs = [
-            RetrievedContext(text="Line 1\nLine 2\nLine 3", source="test.txt", relevance=0.9),
+            RetrievedContext(
+                text="Line 1\nLine 2\nLine 3", source="test.txt", relevance=0.9
+            ),
         ]
         result = _build_context_string(ctxs)
         assert "Line 1\nLine 2\nLine 3" in result

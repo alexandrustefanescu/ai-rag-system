@@ -127,7 +127,9 @@ class TestChunkTextEdgeCases:
 
     def test_mixed_sentence_breaks(self) -> None:
         """Test text with multiple types of sentence breaks."""
-        text = "First sentence. Second sentence! Third sentence? Fourth line\nFifth line"
+        text = (
+            "First sentence. Second sentence! Third sentence? Fourth line\nFifth line"
+        )
         chunks = chunk_text(text, chunk_size=30, chunk_overlap=5)
         assert len(chunks) >= 2
 
@@ -148,11 +150,7 @@ class TestChunkTextEdgeCases:
         """Test that overlap is exactly as specified."""
         text = "0123456789" * 20  # 200 chars
         chunks = chunk_text(text, chunk_size=50, chunk_overlap=10)
-        if len(chunks) >= 2:
-            # Last 10 chars of first should overlap with first 10 of second
-            overlap_expected = 10
-            # This is hard to verify exactly due to boundary splitting, just check we have chunks
-            assert len(chunks) >= 2
+        assert len(chunks) >= 2
 
 
 class TestChunkDocumentsEdgeCases:
@@ -194,7 +192,9 @@ class TestChunkDocumentsEdgeCases:
     def test_multiple_docs_sequential_processing(self) -> None:
         """Test that multiple documents are processed in order."""
         docs = [
-            Document(content=f"Document {i} content", metadata={"source": f"doc{i}.txt"})
+            Document(
+                content=f"Document {i} content", metadata={"source": f"doc{i}.txt"}
+            )
             for i in range(5)
         ]
         chunks = chunk_documents(docs)

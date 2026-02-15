@@ -3,7 +3,13 @@
 import pytest
 from pydantic import ValidationError
 
-from rag_system.config import AppConfig, ChunkConfig, LLMConfig, SSLConfig, VectorStoreConfig
+from rag_system.config import (
+    AppConfig,
+    ChunkConfig,
+    LLMConfig,
+    SSLConfig,
+    VectorStoreConfig,
+)
 
 
 class TestChunkConfig:
@@ -103,6 +109,11 @@ class TestLLMConfig:
     def test_available_models_csv_strips_whitespace(self) -> None:
         c = LLMConfig(available_models=" a , b , c ")
         assert c.available_models == ["a", "b", "c"]
+
+    def test_available_models_from_single_json_value(self) -> None:
+        """When JSON parses to a non-list (e.g. bare string), wrap in list."""
+        c = LLMConfig(available_models='"single-model"')
+        assert c.available_models == ["single-model"]
 
 
 class TestAppConfig:

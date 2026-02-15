@@ -109,7 +109,9 @@ class TestRAGResponse:
 
     def test_rag_response_with_multiple_contexts(self) -> None:
         contexts = [
-            RetrievedContext(text=f"Context {i}", source=f"doc{i}.txt", relevance=0.9 - i * 0.1)
+            RetrievedContext(
+                text=f"Context {i}", source=f"doc{i}.txt", relevance=0.9 - i * 0.1
+            )
             for i in range(5)
         ]
         response = RAGResponse(answer="Multi-context answer", contexts=contexts)
@@ -125,8 +127,12 @@ class TestRAGResponse:
 class TestModelInteroperability:
     def test_document_to_chunk_metadata_transfer(self) -> None:
         """Test that metadata can be transferred from Document to Chunk."""
-        doc = Document(content="Content", metadata={"source": "file.txt", "type": ".txt"})
-        chunk = Chunk(text="Chunk from doc", metadata={**doc.metadata, "chunk_index": 0})
+        doc = Document(
+            content="Content", metadata={"source": "file.txt", "type": ".txt"}
+        )
+        chunk = Chunk(
+            text="Chunk from doc", metadata={**doc.metadata, "chunk_index": 0}
+        )
         assert chunk.metadata["source"] == "file.txt"
         assert chunk.metadata["type"] == ".txt"
         assert chunk.metadata["chunk_index"] == 0

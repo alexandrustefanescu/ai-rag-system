@@ -1,4 +1,4 @@
-.PHONY: help install install-dev dev lint format test test-cov test-e2e test-e2e-headed playwright-install ingest chat pull-model docker-up docker-down docker-ingest docker-chat backup healthcheck healthcheck-watch generate-certs clean
+.PHONY: help install install-dev dev lint format test test-cov test-e2e test-e2e-headed playwright-install ingest chat pull-model docker-up docker-down docker-ingest docker-chat backup healthcheck healthcheck-watch generate-certs build clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -76,6 +76,9 @@ healthcheck-watch: ## Continuous health monitoring (every 60s)
 	bash scripts/healthcheck.sh --watch --log
 
 # ── Utilities ──────────────────────────────────────────────────────
+
+build: ## Build sdist and wheel packages
+	uv run python -m build
 
 clean: ## Remove caches and build artifacts
 	rm -rf __pycache__ .pytest_cache .ruff_cache chroma_db/ dist/ build/ *.egg-info

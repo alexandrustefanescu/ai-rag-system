@@ -1,6 +1,7 @@
 """Tests for the vector_store module."""
 
 import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -106,19 +107,26 @@ class TestGetEmbeddingFunction:
         ef2 = vs.get_embedding_function("all-MiniLM-L6-v2")
         assert ef1 is ef2
 
-    def test_different_models_different_functions(self) -> None:
+    @patch(
+        "rag_system.vector_store.embedding_functions.SentenceTransformerEmbeddingFunction"
+    )
+    def test_different_models_different_functions(self, mock_ef_cls) -> None:
         """Test that different models return different functions."""
-        ef1 = vs.get_embedding_function("model1")
-        ef2 = vs.get_embedding_function("model2")
+        mock_ef_cls.side_effect = lambda model_name: MagicMock(name=model_name)
+        vs._embedding_fn_cache.pop("test-model-a", None)
+        vs._embedding_fn_cache.pop("test-model-b", None)
+        ef1 = vs.get_embedding_function("test-model-a")
+        ef2 = vs.get_embedding_function("test-model-b")
         assert ef1 is not ef2
+        vs._embedding_fn_cache.pop("test-model-a", None)
+        vs._embedding_fn_cache.pop("test-model-b", None)
 
 
 class TestAddChunksEdgeCases:
     def test_adds_chunks_with_sequential_ids(self, collection) -> None:
         """Test that chunk IDs are sequential."""
         chunks = [
-            Chunk(text=f"Chunk {i}", metadata={"source": "test.txt"})
-            for i in range(5)
+            Chunk(text=f"Chunk {i}", metadata={"source": "test.txt"}) for i in range(5)
         ]
         vs.add_chunks(collection, chunks)
 
@@ -139,7 +147,7 @@ class TestAddChunksEdgeCases:
 
     def test_large_batch_size(self, collection) -> None:
         """Test with batch size larger than number of chunks."""
-        chunks = [Chunk(text="Text", metadata={}) for _ in range(5)]
+        chunks = [Chunk(text="Text", metadata={"source": "test.txt"}) for _ in range(5)]
         added = vs.add_chunks(collection, chunks, batch_size=100)
         assert added == 5
 
@@ -163,7 +171,9 @@ class TestQueryEdgeCases:
 
 
 class TestResetCollectionEdgeCases:
-    def test_reset_nonexistent_collection(self, tmp_db_config: VectorStoreConfig) -> None:
+    def test_reset_nonexistent_collection(
+        self, tmp_db_config: VectorStoreConfig
+    ) -> None:
         """Test resetting a collection that doesn't exist yet."""
         client = vs.get_client(tmp_db_config)
         # Should not raise an error
@@ -189,7 +199,9 @@ class TestVectorStoreWithRealData:
         chunks = [
             Chunk(text="Python is a programming language", metadata={"source": "1"}),
             Chunk(text="Dogs are pets that bark", metadata={"source": "2"}),
-            Chunk(text="JavaScript is used for web development", metadata={"source": "3"}),
+            Chunk(
+                text="JavaScript is used for web development", metadata={"source": "3"}
+            ),
         ]
         vs.add_chunks(collection, chunks)
 

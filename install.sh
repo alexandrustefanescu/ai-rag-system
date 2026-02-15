@@ -57,6 +57,34 @@ is_fedora_based() {
 detect_os
 info "Detected OS: $OS_ID"
 
+# ── Docker command helper ─────────────────────────────────────────────────
+# On fresh installs the current shell may not yet have the docker group even
+# though usermod has been called. run_docker detects this and falls back to
+# sudo so the rest of the script can proceed without a re-login.
+
+_docker_needs_sudo=""
+
+_detect_docker_access() {
+    # Already determined — skip.
+    [ -n "${_docker_access_checked:-}" ] && return
+    _docker_access_checked=1
+
+    if docker info >/dev/null 2>&1; then
+        _docker_needs_sudo=""
+    else
+        _docker_needs_sudo=1
+    fi
+}
+
+run_docker() {
+    _detect_docker_access
+    if [ -n "$_docker_needs_sudo" ]; then
+        sudo docker "$@"
+    else
+        docker "$@"
+    fi
+}
+
 # ── Prevent running as root (unless inside Docker) ──────────────────────────
 
 if [ ! -f /.dockerenv ]; then
@@ -107,7 +135,7 @@ fi
 
 # ── Install Docker Compose plugin if missing ────────────────────────────────
 
-if ! docker compose version >/dev/null 2>&1; then
+if ! run_docker compose version >/dev/null 2>&1; then
     info "Installing Docker Compose plugin..."
 
     if is_debian_based; then
@@ -122,16 +150,18 @@ fi
 
 # ── Verify Docker daemon is running ─────────────────────────────────────────
 
-if ! docker info >/dev/null 2>&1; then
+if ! run_docker info >/dev/null 2>&1; then
     # Try starting the service (Linux).
     if command -v systemctl >/dev/null 2>&1; then
         info "Docker daemon is not running, starting it..."
         sudo systemctl start docker
         sleep 2
+        # Re-detect access now that the daemon is up.
+        _docker_access_checked=""
     fi
 
     # Check again.
-    docker info >/dev/null 2>&1 || err "Docker daemon is not running. Start Docker and re-run this script."
+    run_docker info >/dev/null 2>&1 || err "Docker daemon is not running. Start Docker and re-run this script."
 fi
 
 ok "Docker is ready ($(docker --version))"
@@ -268,14 +298,14 @@ ok "docker-compose.yml created"
 # ── Pull images ──────────────────────────────────────────────────────────────
 
 info "Pulling Docker images (this may take a few minutes)..."
-docker pull ollama/ollama:latest
-docker pull "$IMAGE"
+run_docker pull ollama/ollama:latest
+run_docker pull "$IMAGE"
 ok "Images pulled"
 
 # ── Start services ───────────────────────────────────────────────────────────
 
 info "Starting AI RAG System..."
-docker compose -f "$COMPOSE_FILE" up -d
+run_docker compose -f "$COMPOSE_FILE" up -d
 
 ok "AI RAG System is starting!"
 

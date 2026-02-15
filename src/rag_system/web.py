@@ -179,10 +179,23 @@ def api_upload(
             dest.relative_to(docs_dir_resolved)
         except ValueError:
             continue
-        content = file.file.read()
-        if len(content) > 50 * 1024 * 1024:  # 50 MB limit per file
+        max_size = 50 * 1024 * 1024  # 50 MB limit per file
+        read_chunk = 1024 * 1024  # 1 MB read chunks
+        total = 0
+        parts: list[bytes] = []
+        oversized = False
+        while True:
+            chunk = file.file.read(read_chunk)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_size:
+                oversized = True
+                break
+            parts.append(chunk)
+        if oversized:
             continue
-        dest.write_bytes(content)
+        dest.write_bytes(b"".join(parts))
         saved += 1
 
     if saved == 0:
@@ -198,7 +211,7 @@ def api_upload(
 
 
 @router.get("/documents", response_model=DocumentListResponse)
-async def api_list_documents(collection=Depends(get_collection)):
+def api_list_documents(collection=Depends(get_collection)):
     files = []
 
     # List documents from the vector store metadata (the source of truth).
@@ -225,7 +238,7 @@ async def api_list_documents(collection=Depends(get_collection)):
 
 
 @router.delete("/documents/{filename}", response_model=DeleteResponse)
-async def api_delete_document(filename: str, collection=Depends(get_collection)):
+def api_delete_document(filename: str, collection=Depends(get_collection)):
     docs_dir = Path(_config.documents_dir).resolve()
     target = (docs_dir / filename).resolve()
 

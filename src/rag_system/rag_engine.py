@@ -42,7 +42,7 @@ def _parse_results(results: dict) -> list[RetrievedContext]:
         contexts.append(
             RetrievedContext(
                 text=doc,
-                source=meta.get("source", "unknown"),
+                source=(meta or {}).get("source", "unknown"),
                 relevance=round(1 - dist, 4),  # cosine distance → similarity
             )
         )
