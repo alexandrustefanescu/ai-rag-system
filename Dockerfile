@@ -12,19 +12,18 @@ RUN pip install --no-cache-dir uv
 # Copy dependency files first (better layer caching).
 COPY pyproject.toml README.md ./
 
-# Install dependencies (without the project itself).
-RUN uv pip install --system --no-cache-dir .
+# Install only third-party dependencies (skip building the local package
+# since src/rag_system isn't present yet — avoids hatchling build failure).
+RUN uv pip install --system --no-cache-dir --no-install-project .
 
-# Copy source code and cert generation script.
+# Copy source code and scripts.
 COPY src/ src/
 COPY documents/ documents/
 COPY scripts/generate-certs.sh scripts/generate-certs.sh
+COPY scripts/entrypoint.sh scripts/entrypoint.sh
 
-# Install the project.
+# Install the local package now that source is present.
 RUN uv pip install --system --no-cache-dir -e .
-
-# Generate self-signed certs at build time (can be overridden via volume mount).
-RUN bash scripts/generate-certs.sh ./certs
 
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app
@@ -33,4 +32,5 @@ USER appuser
 
 EXPOSE 8443
 
+ENTRYPOINT ["bash", "scripts/entrypoint.sh"]
 CMD ["uvicorn", "rag_system.web:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "./certs/key.pem", "--ssl-certfile", "./certs/cert.pem"]

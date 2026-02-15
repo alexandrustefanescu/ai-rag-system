@@ -42,6 +42,8 @@ services:
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
+      # Mount your own cert.pem + key.pem here for production.
+      # If empty, the entrypoint auto-generates self-signed certs on startup.
       - ./certs:/app/certs
 
 volumes:
