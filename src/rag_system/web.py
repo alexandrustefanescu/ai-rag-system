@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,20 +17,19 @@ from rag_system.text_chunker import chunk_documents
 logger = logging.getLogger(__name__)
 
 _config = AppConfig()
-_client = None
-_collection = None
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(application: FastAPI):
     """Initialize ChromaDB client and collection on startup."""
-    global _client, _collection
-    _client = vs.get_client(_config.vector_store)
-    _collection = vs.get_or_create_collection(_client, _config.vector_store)
-    logger.info("ChromaDB initialized (%d chunks indexed)", _collection.count())
+    client = vs.get_client(_config.vector_store)
+    collection = vs.get_or_create_collection(client, _config.vector_store)
+    application.state.chroma_client = client
+    application.state.chroma_collection = collection
+    logger.info("ChromaDB initialized (%d chunks indexed)", collection.count())
     yield
 
 
@@ -43,6 +42,16 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 router = APIRouter(prefix="/api/v1")
+
+
+def get_collection(request: Request):
+    """FastAPI dependency — return the current ChromaDB collection from app state."""
+    return getattr(request.app.state, "chroma_collection", None)
+
+
+def get_client(request: Request):
+    """FastAPI dependency — return the current ChromaDB client from app state."""
+    return getattr(request.app.state, "chroma_client", None)
 
 
 class AskRequest(BaseModel):
@@ -101,7 +110,7 @@ class StatusResponse(BaseModel):
 
 
 @router.get("/health", response_model=HealthResponse)
-async def api_health():
+async def api_health(collection=Depends(get_collection)):
     connected = True
     try:
         import ollama
@@ -110,7 +119,7 @@ async def api_health():
     except Exception:
         connected = False
 
-    doc_count = _collection.count() if _collection else 0
+    doc_count = collection.count() if collection else 0
     status = "healthy" if connected else "degraded"
 
     return HealthResponse(
@@ -121,8 +130,11 @@ async def api_health():
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def api_ingest():
-    global _collection
+async def api_ingest(
+    request: Request,
+    collection=Depends(get_collection),
+    client=Depends(get_client),
+):
     folder = _config.documents_dir
     documents = load_documents(folder)
 
@@ -130,8 +142,9 @@ async def api_ingest():
         return IngestResponse(status="no_documents", chunks=0)
 
     chunks = chunk_documents(documents, _config.chunk)
-    _collection = vs.reset_collection(_client, _config.vector_store)
-    added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
+    collection = vs.reset_collection(client, _config.vector_store)
+    request.app.state.chroma_collection = collection
+    added = vs.add_chunks(collection, chunks, _config.vector_store.batch_size)
 
     return IngestResponse(status="ok", chunks=added)
 
@@ -140,8 +153,12 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def api_upload(files: list[UploadFile]):
-    global _collection
+async def api_upload(
+    files: list[UploadFile],
+    request: Request,
+    collection=Depends(get_collection),
+    client=Depends(get_client),
+):
     docs_dir = Path(_config.documents_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -171,19 +188,20 @@ async def api_upload(files: list[UploadFile]):
 
     documents = load_documents(str(docs_dir))
     chunks = chunk_documents(documents, _config.chunk)
-    _collection = vs.reset_collection(_client, _config.vector_store)
-    added = vs.add_chunks(_collection, chunks, _config.vector_store.batch_size)
+    collection = vs.reset_collection(client, _config.vector_store)
+    request.app.state.chroma_collection = collection
+    added = vs.add_chunks(collection, chunks, _config.vector_store.batch_size)
 
     return UploadResponse(status="ok", files_saved=saved, chunks=added)
 
 
 @router.get("/documents", response_model=DocumentListResponse)
-async def api_list_documents():
+async def api_list_documents(collection=Depends(get_collection)):
     files = []
 
     # List documents from the vector store metadata (the source of truth).
-    if _collection and _collection.count() > 0:
-        result = _collection.get(include=["metadatas"])
+    if collection and collection.count() > 0:
+        result = collection.get(include=["metadatas"])
         sources: dict[str, int] = {}
         for meta in result.get("metadatas") or []:
             src = (meta or {}).get("source", "unknown")
@@ -205,8 +223,7 @@ async def api_list_documents():
 
 
 @router.delete("/documents/{filename}", response_model=DeleteResponse)
-async def api_delete_document(filename: str):
-    global _collection
+async def api_delete_document(filename: str, collection=Depends(get_collection)):
     docs_dir = Path(_config.documents_dir).resolve()
     target = (docs_dir / filename).resolve()
 
@@ -219,8 +236,8 @@ async def api_delete_document(filename: str):
         target.unlink()
 
     # Remove chunks with this source from the vector store.
-    if _collection and _collection.count() > 0:
-        result = _collection.get(include=["metadatas"])
+    if collection and collection.count() > 0:
+        result = collection.get(include=["metadatas"])
         ids_to_delete = [
             doc_id
             for doc_id, meta in zip(
@@ -230,21 +247,21 @@ async def api_delete_document(filename: str):
             if (meta or {}).get("source") == filename
         ]
         if ids_to_delete:
-            _collection.delete(ids=ids_to_delete)
+            collection.delete(ids=ids_to_delete)
 
-    remaining_chunks = _collection.count() if _collection else 0
+    remaining_chunks = collection.count() if collection else 0
     return DeleteResponse(status="ok", chunks=remaining_chunks)
 
 
 @router.post("/ask", response_model=AskResponse)
-async def api_ask(body: AskRequest):
+async def api_ask(body: AskRequest, collection=Depends(get_collection)):
     llm_config = _config.llm
     if body.model and body.model in _config.llm.available_models:
         llm_config = _config.llm.model_copy(update={"model": body.model})
 
     response = rag_engine.ask(
         body.question,
-        _collection,
+        collection,
         config=llm_config,
         n_results=_config.vector_store.query_results,
     )
@@ -258,7 +275,7 @@ async def api_ask(body: AskRequest):
 
 
 @router.get("/status", response_model=StatusResponse)
-async def api_status():
+async def api_status(collection=Depends(get_collection)):
     connected = True
     try:
         import ollama
@@ -268,7 +285,7 @@ async def api_status():
         connected = False
 
     return StatusResponse(
-        documents=_collection.count() if _collection else 0,
+        documents=collection.count() if collection else 0,
         model=_config.llm.model,
         available_models=_config.llm.available_models,
         ollama_connected=connected,

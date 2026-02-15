@@ -18,7 +18,7 @@ async def _noop_lifespan(app):
 
 @pytest.fixture(autouse=True)
 def _tmp_config(tmp_path):
-    """Patch web module globals with a temp config and mock ChromaDB.
+    """Patch web module config and inject mock ChromaDB into app.state.
 
     The lifespan is replaced with a no-op so that TestClient does not
     create a real ChromaDB client/collection on startup.
@@ -30,22 +30,18 @@ def _tmp_config(tmp_path):
     mock_client = MagicMock()
 
     original_config = web._config
-    original_client = web._client
-    original_collection = web._collection
     original_lifespan = web.app.router.lifespan_context
 
     web.app.router.lifespan_context = _noop_lifespan
     web._config = web.AppConfig(documents_dir=str(tmp_path / "docs"))
-    web._client = mock_client
-    web._collection = mock_collection
+    web.app.state.chroma_client = mock_client
+    web.app.state.chroma_collection = mock_collection
 
     (tmp_path / "docs").mkdir()
 
     yield web, mock_collection, mock_client
 
     web._config = original_config
-    web._client = original_client
-    web._collection = original_collection
     web.app.router.lifespan_context = original_lifespan
 
 
