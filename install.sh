@@ -5,7 +5,7 @@ set -euo pipefail
 # Works on a fresh device — installs Docker if needed, then sets up everything.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/alexandrustefanescu/ai-rag-system/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/alexandrustefanescu/ai-rag-system/main/install.sh | bash
 #
 # Tested on: Raspberry Pi OS, Ubuntu, Debian, Fedora, macOS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +179,29 @@ fi
 
 mkdir -p "$INSTALL_DIR/documents"
 
+# ── Generate self-signed TLS certificates if missing ─────────────────────────
+
+CERT_DIR="$INSTALL_DIR/certs"
+mkdir -p "$CERT_DIR"
+
+if [ -f "$CERT_DIR/cert.pem" ] && [ -f "$CERT_DIR/key.pem" ]; then
+    ok "TLS certificates already exist in $CERT_DIR"
+else
+    if ! command -v openssl >/dev/null 2>&1; then
+        warn "openssl not found — skipping cert generation. The container entrypoint will generate certs at startup."
+    else
+        info "Generating self-signed TLS certificates..."
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$CERT_DIR/key.pem" \
+            -out "$CERT_DIR/cert.pem" \
+            -days 825 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            2>/dev/null
+        ok "Self-signed certificates created in $CERT_DIR"
+    fi
+fi
+
 # ── Write docker-compose.yml ─────────────────────────────────────────────────
 
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
@@ -231,6 +254,7 @@ services:
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
+      - ./certs:/app/certs
 
 volumes:
   ollama_data:

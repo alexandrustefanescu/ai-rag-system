@@ -32,14 +32,21 @@ fi
 # --- Back up ChromaDB ---
 # Check for Docker volume first, then local directory.
 if docker compose ps --status running 2>/dev/null | grep -q rag-app; then
-    echo "[INFO] Docker detected — exporting chroma_db from container..."
-    docker compose cp rag-app:/app/chroma_db "${STAGING_DIR}/chroma_db"
-    echo "[OK] ChromaDB exported from Docker container"
-elif [ -d "./chroma_db" ] && [ "$(ls -A ./chroma_db 2>/dev/null)" ]; then
-    cp -r ./chroma_db "${STAGING_DIR}/chroma_db"
-    echo "[OK] ChromaDB: local directory copied"
-else
-    echo "[SKIP] No ChromaDB data found"
+    echo "[INFO] Docker detected — exporting chroma_db from rag-app container..."
+    if docker compose cp rag-app:/app/chroma_db "${STAGING_DIR}/chroma_db"; then
+        echo "[OK] ChromaDB exported from rag-app to ${STAGING_DIR}/chroma_db"
+    else
+        echo "[WARN] Failed to copy chroma_db from rag-app — falling back to local directory"
+    fi
+fi
+
+if [ ! -d "${STAGING_DIR}/chroma_db" ]; then
+    if [ -d "./chroma_db" ] && [ "$(ls -A ./chroma_db 2>/dev/null)" ]; then
+        cp -r ./chroma_db "${STAGING_DIR}/chroma_db"
+        echo "[OK] ChromaDB: local directory copied"
+    else
+        echo "[SKIP] No ChromaDB data found"
+    fi
 fi
 
 # --- Create compressed archive ---
