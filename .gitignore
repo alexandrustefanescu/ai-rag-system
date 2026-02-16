@@ -12,3 +12,4 @@ certs/
 backups/
 .DS_Store
 logs/
+documents/
