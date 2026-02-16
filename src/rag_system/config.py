@@ -1,6 +1,7 @@
 """Centralized configuration for the RAG system."""
 
 import json
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,8 +12,11 @@ class ChunkConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CHUNK_", frozen=True)
 
-    size: int = Field(default=500, gt=0)
-    overlap: int = Field(default=100, ge=0)
+    size: int = Field(default=1000, gt=0)
+    overlap: int = Field(default=200, ge=0)
+    strategy: Literal["fixed", "semantic"] = "fixed"
+    semantic_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    semantic_max_size: int = Field(default=2000, gt=0)
 
     @model_validator(mode="after")
     def _overlap_less_than_size(self) -> "ChunkConfig":
@@ -29,8 +33,8 @@ class VectorStoreConfig(BaseSettings):
 
     db_path: str = "./chroma_db"
     collection_name: str = "rag_documents"
-    embedding_model: str = "all-MiniLM-L6-v2"
-    query_results: int = Field(default=5, gt=0)
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    query_results: int = Field(default=8, gt=0)
     batch_size: int = Field(default=100, gt=0)
 
 
@@ -58,8 +62,8 @@ class LLMConfig(BaseSettings):
             return [str(item) for item in parsed]
         return v  # type: ignore[return-value]
 
-    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=512, gt=0)
+    temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=1024, gt=0)
 
 
 class SSLConfig(BaseSettings):

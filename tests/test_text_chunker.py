@@ -1,8 +1,17 @@
 """Tests for the text_chunker module."""
 
+from unittest.mock import patch
+
+import numpy as np
+
 from rag_system.config import ChunkConfig
 from rag_system.models import Document
-from rag_system.text_chunker import chunk_documents, chunk_text
+from rag_system.text_chunker import (
+    _cosine_similarity,
+    _split_sentences,
+    chunk_documents,
+    chunk_text,
+)
 
 
 class TestChunkText:
@@ -222,3 +231,133 @@ class TestChunkDocumentsEdgeCases:
         chunks = chunk_documents([doc], config)
         # With high overlap, we get many chunks
         assert len(chunks) > 5
+
+
+class TestSplitSentences:
+    def test_simple_sentences(self) -> None:
+        text = "First sentence. Second sentence. Third sentence."
+        sentences = _split_sentences(text)
+        assert len(sentences) >= 2
+        assert any("First" in s for s in sentences)
+
+    def test_paragraph_breaks(self) -> None:
+        text = "Paragraph one.\n\nParagraph two."
+        sentences = _split_sentences(text)
+        assert len(sentences) == 2
+
+    def test_long_sentence_fallback(self) -> None:
+        text = "x" * 2000
+        sentences = _split_sentences(text)
+        assert len(sentences) > 1
+        assert all(len(s) <= 1000 for s in sentences)
+
+    def test_empty_text(self) -> None:
+        assert _split_sentences("") == []
+        assert _split_sentences("   ") == []
+
+
+class TestCosineSimilarity:
+    def test_identical_vectors(self) -> None:
+        v = np.array([1.0, 2.0, 3.0])
+        assert _cosine_similarity(v, v) == 1.0
+
+    def test_orthogonal_vectors(self) -> None:
+        a = np.array([1.0, 0.0])
+        b = np.array([0.0, 1.0])
+        assert abs(_cosine_similarity(a, b)) < 1e-6
+
+    def test_zero_vector(self) -> None:
+        a = np.array([1.0, 2.0])
+        z = np.array([0.0, 0.0])
+        assert _cosine_similarity(a, z) == 0.0
+
+
+def _fake_embed(sentences):
+    """Return deterministic embeddings that simulate topic shifts."""
+    embeddings = []
+    for s in sentences:
+        if "Python" in s or "programming" in s:
+            embeddings.append(np.array([1.0, 0.0, 0.0]))
+        elif "cooking" in s or "recipe" in s:
+            embeddings.append(np.array([0.0, 1.0, 0.0]))
+        else:
+            embeddings.append(np.array([0.5, 0.5, 0.0]))
+    return embeddings
+
+
+class TestSemanticChunking:
+    @patch("rag_system.vector_store.get_embedding_function")
+    def test_splits_on_topic_shift(self, mock_get_ef) -> None:
+        mock_get_ef.return_value = _fake_embed
+        # Make text long enough to exceed semantic_max_size so it isn't
+        # returned as a single chunk by the short-circuit.
+        python_part = "Python is a programming language. " * 10
+        cooking_part = "Cooking is an art. A recipe needs ingredients. " * 10
+        text = python_part + "\n\n" + cooking_part
+        config = ChunkConfig(
+            strategy="semantic", semantic_threshold=0.5, semantic_max_size=500
+        )
+        doc = Document(content=text, metadata={"source": "test.txt"})
+        chunks = chunk_documents([doc], config)
+        assert len(chunks) >= 2
+        assert any("Python" in c.text for c in chunks)
+        assert any("Cooking" in c.text or "recipe" in c.text for c in chunks)
+
+    @patch("rag_system.vector_store.get_embedding_function")
+    def test_respects_max_size(self, mock_get_ef) -> None:
+        mock_get_ef.return_value = lambda sents: [np.array([1.0, 0.0]) for _ in sents]
+        text = "Same topic sentence. " * 200
+        config = ChunkConfig(
+            strategy="semantic", semantic_threshold=0.1, semantic_max_size=300
+        )
+        doc = Document(content=text, metadata={"source": "test.txt"})
+        chunks = chunk_documents([doc], config)
+        for c in chunks:
+            assert len(c.text) <= 300
+
+    def test_short_text_single_chunk(self) -> None:
+        config = ChunkConfig(strategy="semantic", semantic_max_size=1000)
+        doc = Document(content="Short text.", metadata={"source": "t.txt"})
+        chunks = chunk_documents([doc], config)
+        assert len(chunks) == 1
+        assert chunks[0].text == "Short text."
+
+    def test_empty_text(self) -> None:
+        config = ChunkConfig(strategy="semantic")
+        doc = Document(content="", metadata={"source": "e.txt"})
+        chunks = chunk_documents([doc], config)
+        assert chunks == []
+
+    def test_no_sentence_boundaries_falls_back(self) -> None:
+        text = "x" * 3000
+        config = ChunkConfig(strategy="semantic", semantic_max_size=500)
+        doc = Document(content=text, metadata={"source": "t.txt"})
+        chunks = chunk_documents([doc], config)
+        assert len(chunks) > 1
+        for c in chunks:
+            assert len(c.text) <= 500
+
+    def test_default_strategy_is_fixed(self) -> None:
+        config = ChunkConfig()
+        assert config.strategy == "fixed"
+        doc = Document(content="Word " * 500, metadata={"source": "t.txt"})
+        chunks = chunk_documents([doc], config)
+        assert len(chunks) > 0
+
+    @patch("rag_system.vector_store.get_embedding_function")
+    def test_metadata_preserved(self, mock_get_ef) -> None:
+        mock_get_ef.return_value = _fake_embed
+        text = "Python is a programming language.\n\nCooking is an art with a recipe."
+        config = ChunkConfig(
+            strategy="semantic", semantic_threshold=0.5, semantic_max_size=5000
+        )
+        doc = Document(
+            content=text,
+            metadata={"source": "f.md", "file_type": ".md"},
+        )
+        chunks = chunk_documents([doc], config)
+        for c in chunks:
+            assert c.metadata["source"] == "f.md"
+            assert c.metadata["file_type"] == ".md"
+            assert "chunk_index" in c.metadata
+            assert "total_chunks" in c.metadata

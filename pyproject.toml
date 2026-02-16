@@ -3,7 +3,7 @@ name = "rag-system"
 version = "1.0.0"
 description = "Local LLM-powered Retrieval-Augmented Generation system using Ollama and ChromaDB"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "chromadb>=0.4.22",
     "sentence-transformers>=2.2.2",

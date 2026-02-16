@@ -12,5 +12,9 @@ fi
 # Ensure appuser can read the certificates.
 chown -R appuser:appuser ./certs 2>/dev/null || true
 
+# Ensure appuser owns the ChromaDB data directory.
+mkdir -p ./chroma_db
+chown -R appuser:appuser ./chroma_db
+
 # Drop privileges and exec the main process as appuser.
 exec gosu appuser "$@"

@@ -15,8 +15,11 @@ from rag_system.config import (
 class TestChunkConfig:
     def test_defaults(self) -> None:
         c = ChunkConfig()
-        assert c.size == 500
-        assert c.overlap == 100
+        assert c.size == 1000
+        assert c.overlap == 200
+        assert c.strategy == "fixed"
+        assert c.semantic_threshold == 0.5
+        assert c.semantic_max_size == 2000
 
     def test_custom_values(self) -> None:
         c = ChunkConfig(size=1000, overlap=100)
@@ -58,8 +61,8 @@ class TestVectorStoreConfig:
         c = VectorStoreConfig()
         assert c.db_path == "./chroma_db"
         assert c.collection_name == "rag_documents"
-        assert c.embedding_model == "all-MiniLM-L6-v2"
-        assert c.query_results == 5
+        assert c.embedding_model == "BAAI/bge-small-en-v1.5"
+        assert c.query_results == 8
         assert c.batch_size == 100
 
     def test_rejects_zero_query_results(self) -> None:
@@ -75,8 +78,8 @@ class TestLLMConfig:
     def test_defaults(self) -> None:
         c = LLMConfig()
         assert c.model == "gemma3:1b"
-        assert c.temperature == 0.3
-        assert c.max_tokens == 512
+        assert c.temperature == 0.1
+        assert c.max_tokens == 1024
 
     def test_rejects_negative_temperature(self) -> None:
         with pytest.raises(ValidationError):
@@ -228,3 +231,25 @@ class TestChunkConfigEdgeCases:
         c = ChunkConfig(size=1, overlap=0)
         assert c.size == 1
         assert c.overlap == 0
+
+    def test_semantic_strategy(self) -> None:
+        c = ChunkConfig(strategy="semantic")
+        assert c.strategy == "semantic"
+
+    def test_rejects_invalid_strategy(self) -> None:
+        with pytest.raises(ValidationError):
+            ChunkConfig(strategy="unknown")
+
+    def test_semantic_threshold_bounds(self) -> None:
+        assert ChunkConfig(semantic_threshold=0.0).semantic_threshold == 0.0
+        assert ChunkConfig(semantic_threshold=1.0).semantic_threshold == 1.0
+
+    def test_rejects_semantic_threshold_out_of_range(self) -> None:
+        with pytest.raises(ValidationError):
+            ChunkConfig(semantic_threshold=-0.1)
+        with pytest.raises(ValidationError):
+            ChunkConfig(semantic_threshold=1.1)
+
+    def test_rejects_zero_semantic_max_size(self) -> None:
+        with pytest.raises(ValidationError):
+            ChunkConfig(semantic_max_size=0)

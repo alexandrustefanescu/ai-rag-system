@@ -11,6 +11,22 @@ from fastapi.testclient import TestClient
 from rag_system.models import RAGResponse, RetrievedContext
 
 
+def _mock_ollama_list(models=None):
+    """Create a mock return value for ollama.list().
+
+    Each model dict should have 'model' and optionally 'size' keys.
+    """
+    mock_models = []
+    for m in models or []:
+        obj = MagicMock()
+        obj.model = m.get("model", "unknown")
+        obj.size = m.get("size", 0)
+        mock_models.append(obj)
+    resp = MagicMock()
+    resp.models = mock_models
+    return resp
+
+
 @asynccontextmanager
 async def _noop_lifespan(app):
     yield
@@ -36,6 +52,7 @@ def _tmp_config(tmp_path):
     web._config = web.AppConfig(documents_dir=str(tmp_path / "docs"))
     web.app.state.chroma_client = mock_client
     web.app.state.chroma_collection = mock_collection
+    web.app.state.pull_status = {}
 
     (tmp_path / "docs").mkdir()
 
@@ -98,19 +115,22 @@ class TestHealth:
 
 class TestStatus:
     def test_returns_model_info(self, client):
-        with patch("ollama.list"):
+        mock_resp = _mock_ollama_list([{"model": "gemma3:1b"}])
+        with patch("ollama.list", return_value=mock_resp):
             resp = client.get("/api/v1/status")
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["model"] == "gemma3:1b"
         assert "gemma3:1b" in data["available_models"]
+        assert "gemma3:1b" in data["downloaded_models"]
 
     def test_returns_document_count(self, client, _tmp_config):
         _, collection, _ = _tmp_config
         collection.count.return_value = 10
 
-        with patch("ollama.list"):
+        mock_resp = _mock_ollama_list()
+        with patch("ollama.list", return_value=mock_resp):
             resp = client.get("/api/v1/status")
 
         assert resp.json()["documents"] == 10
@@ -120,6 +140,7 @@ class TestStatus:
             resp = client.get("/api/v1/status")
 
         assert resp.json()["ollama_connected"] is False
+        assert resp.json()["downloaded_models"] == []
 
 
 # ---------- Ingest endpoint ----------
@@ -412,6 +433,14 @@ class TestDeleteDocument:
 
 
 class TestAsk:
+    def _ollama_with_defaults(self):
+        return _mock_ollama_list(
+            [
+                {"model": "gemma3:1b"},
+                {"model": "llama3.2:1b"},
+            ]
+        )
+
     def test_ask_returns_answer_and_sources(self, client):
         mock_response = RAGResponse(
             answer="Python is great.",
@@ -420,11 +449,12 @@ class TestAsk:
             ],
         )
 
-        with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
-            resp = client.post(
-                "/api/v1/ask",
-                json={"question": "What is Python?"},
-            )
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
+                resp = client.post(
+                    "/api/v1/ask",
+                    json={"question": "What is Python?"},
+                )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -436,13 +466,14 @@ class TestAsk:
     def test_ask_with_model_override(self, client):
         mock_response = RAGResponse(answer="Answer", contexts=[])
 
-        with patch(
-            "rag_system.web.rag_engine.ask", return_value=mock_response
-        ) as mock_ask:
-            resp = client.post(
-                "/api/v1/ask",
-                json={"question": "Hello?", "model": "llama3.2:1b"},
-            )
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch(
+                "rag_system.web.rag_engine.ask", return_value=mock_response
+            ) as mock_ask:
+                resp = client.post(
+                    "/api/v1/ask",
+                    json={"question": "Hello?", "model": "llama3.2:1b"},
+                )
 
         assert resp.status_code == 200
         call_kwargs = mock_ask.call_args
@@ -452,13 +483,14 @@ class TestAsk:
     def test_ask_with_invalid_model_uses_default(self, client):
         mock_response = RAGResponse(answer="Default model answer", contexts=[])
 
-        with patch(
-            "rag_system.web.rag_engine.ask", return_value=mock_response
-        ) as mock_ask:
-            resp = client.post(
-                "/api/v1/ask",
-                json={"question": "Hello?", "model": "nonexistent-model"},
-            )
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch(
+                "rag_system.web.rag_engine.ask", return_value=mock_response
+            ) as mock_ask:
+                resp = client.post(
+                    "/api/v1/ask",
+                    json={"question": "Hello?", "model": "nonexistent-model"},
+                )
 
         assert resp.status_code == 200
         call_kwargs = mock_ask.call_args
@@ -468,13 +500,14 @@ class TestAsk:
     def test_ask_without_model_uses_default(self, client):
         mock_response = RAGResponse(answer="Answer", contexts=[])
 
-        with patch(
-            "rag_system.web.rag_engine.ask", return_value=mock_response
-        ) as mock_ask:
-            resp = client.post(
-                "/api/v1/ask",
-                json={"question": "Tell me something"},
-            )
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch(
+                "rag_system.web.rag_engine.ask", return_value=mock_response
+            ) as mock_ask:
+                resp = client.post(
+                    "/api/v1/ask",
+                    json={"question": "Tell me something"},
+                )
 
         assert resp.status_code == 200
         call_kwargs = mock_ask.call_args
@@ -484,8 +517,9 @@ class TestAsk:
     def test_ask_with_empty_question(self, client):
         mock_response = RAGResponse(answer="No relevant documents found.", contexts=[])
 
-        with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
-            resp = client.post("/api/v1/ask", json={"question": ""})
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
+                resp = client.post("/api/v1/ask", json={"question": ""})
 
         assert resp.status_code == 200
 
@@ -504,11 +538,12 @@ class TestAsk:
             ],
         )
 
-        with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
-            resp = client.post(
-                "/api/v1/ask",
-                json={"question": "Multi-source question"},
-            )
+        with patch("ollama.list", return_value=self._ollama_with_defaults()):
+            with patch("rag_system.web.rag_engine.ask", return_value=mock_response):
+                resp = client.post(
+                    "/api/v1/ask",
+                    json={"question": "Multi-source question"},
+                )
 
         assert len(resp.json()["sources"]) == 3
         sources = [s["source"] for s in resp.json()["sources"]]
@@ -518,6 +553,18 @@ class TestAsk:
         resp = client.post("/api/v1/ask")
 
         assert resp.status_code == 422
+
+    def test_ask_returns_400_when_model_not_downloaded(self, client):
+        """Ask returns 400 when selected model is not downloaded."""
+        mock_resp = _mock_ollama_list()  # No models downloaded
+        with patch("ollama.list", return_value=mock_resp):
+            resp = client.post(
+                "/api/v1/ask",
+                json={"question": "Hello?"},
+            )
+
+        assert resp.status_code == 400
+        assert "not downloaded" in resp.json()["detail"].lower()
 
 
 # ---------- SSLConfig ----------
@@ -670,7 +717,8 @@ class TestStatusEdgeCases:
         web = _tmp_config[0]
         web.app.state.chroma_collection = None
 
-        with patch("ollama.list"):
+        mock_resp = _mock_ollama_list()
+        with patch("ollama.list", return_value=mock_resp):
             resp = client.get("/api/v1/status")
 
         assert resp.status_code == 200
@@ -758,3 +806,182 @@ class TestUploadPathTraversal:
         )
         assert resp.status_code == 200
         assert resp.json()["files_saved"] == 0
+
+
+# ---------- Model management endpoints ----------
+
+
+class TestModelList:
+    def test_lists_models_with_download_status(self, client):
+        """Models endpoint returns available models with download flags."""
+        mock_resp = _mock_ollama_list(
+            [
+                {"model": "gemma3:1b", "size": 500 * 1024 * 1024},
+            ]
+        )
+        with patch("ollama.list", return_value=mock_resp):
+            resp = client.get("/api/v1/models")
+
+        assert resp.status_code == 200
+        models = resp.json()["models"]
+        names = [m["name"] for m in models]
+        assert "gemma3:1b" in names
+        assert "llama3.2:1b" in names
+
+        gemma = next(m for m in models if m["name"] == "gemma3:1b")
+        assert gemma["downloaded"] is True
+        assert gemma["size_mb"] > 0
+
+        llama = next(m for m in models if m["name"] == "llama3.2:1b")
+        assert llama["downloaded"] is False
+
+    def test_lists_models_when_ollama_down(self, client):
+        """Models endpoint works even when Ollama is unreachable."""
+        with patch("ollama.list", side_effect=Exception("down")):
+            resp = client.get("/api/v1/models")
+
+        assert resp.status_code == 200
+        models = resp.json()["models"]
+        assert all(m["downloaded"] is False for m in models)
+
+
+class TestModelPull:
+    def test_pull_starts_for_valid_model(self, client, _tmp_config):
+        """Pull endpoint accepts a valid model and returns pulling status."""
+        with patch("ollama.pull", return_value=iter([])):
+            resp = client.post(
+                "/api/v1/models/pull",
+                json={"model": "gemma3:1b"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pulling"
+
+    def test_pull_rejects_unknown_model(self, client):
+        """Pull endpoint rejects models not in the available list."""
+        resp = client.post(
+            "/api/v1/models/pull",
+            json={"model": "unknown-model"},
+        )
+
+        assert resp.status_code == 400
+        assert "not in available" in resp.json()["detail"].lower()
+
+    def test_pull_already_pulling(self, client, _tmp_config):
+        """Pull returns already_pulling when model is being downloaded."""
+        web = _tmp_config[0]
+        web.app.state.pull_status["gemma3:1b"] = {
+            "status": "pulling",
+            "progress": "50%",
+        }
+
+        resp = client.post(
+            "/api/v1/models/pull",
+            json={"model": "gemma3:1b"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "already_pulling"
+
+
+class TestModelDelete:
+    def test_delete_downloaded_model(self, client):
+        """Delete endpoint removes a downloaded model."""
+        mock_resp = _mock_ollama_list([{"model": "gemma3:1b"}])
+        with (
+            patch("ollama.list", return_value=mock_resp),
+            patch("ollama.delete") as mock_del,
+        ):
+            resp = client.delete("/api/v1/models/gemma3:1b")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        mock_del.assert_called_once_with("gemma3:1b")
+
+    def test_delete_not_downloaded_returns_404(self, client):
+        """Delete returns 404 when model is not downloaded."""
+        mock_resp = _mock_ollama_list()
+        with patch("ollama.list", return_value=mock_resp):
+            resp = client.delete("/api/v1/models/gemma3:1b")
+
+        assert resp.status_code == 404
+        assert "not downloaded" in resp.json()["detail"].lower()
+
+    def test_delete_clears_pull_status(self, client, _tmp_config):
+        """Delete clears any stale pull status entry."""
+        web = _tmp_config[0]
+        web.app.state.pull_status["gemma3:1b"] = {
+            "status": "completed",
+            "progress": "done",
+        }
+        mock_resp = _mock_ollama_list([{"model": "gemma3:1b"}])
+        with (
+            patch("ollama.list", return_value=mock_resp),
+            patch("ollama.delete"),
+        ):
+            resp = client.delete("/api/v1/models/gemma3:1b")
+
+        assert resp.status_code == 200
+        assert "gemma3:1b" not in web.app.state.pull_status
+
+    def test_delete_ollama_error_returns_500(self, client):
+        """Delete returns 500 when ollama.delete raises."""
+        mock_resp = _mock_ollama_list([{"model": "gemma3:1b"}])
+        with (
+            patch("ollama.list", return_value=mock_resp),
+            patch(
+                "ollama.delete",
+                side_effect=RuntimeError("disk error"),
+            ),
+        ):
+            resp = client.delete("/api/v1/models/gemma3:1b")
+
+        assert resp.status_code == 500
+        assert "failed to delete" in resp.json()["detail"].lower()
+
+
+class TestModelStatus:
+    def test_status_not_started(self, client):
+        """Model status returns not_started for unknown model."""
+        mock_resp = _mock_ollama_list()
+        with patch("ollama.list", return_value=mock_resp):
+            resp = client.get("/api/v1/models/gemma3:1b/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "not_started"
+
+    def test_status_completed_when_downloaded(self, client):
+        """Model status returns completed if model is already downloaded."""
+        mock_resp = _mock_ollama_list([{"model": "gemma3:1b"}])
+        with patch("ollama.list", return_value=mock_resp):
+            resp = client.get("/api/v1/models/gemma3:1b/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+
+    def test_status_pulling(self, client, _tmp_config):
+        """Model status returns pulling progress from app state."""
+        web = _tmp_config[0]
+        web.app.state.pull_status["gemma3:1b"] = {
+            "status": "pulling",
+            "progress": "downloading 45%",
+        }
+
+        resp = client.get("/api/v1/models/gemma3:1b/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pulling"
+        assert "45%" in resp.json()["progress"]
+
+    def test_status_error(self, client, _tmp_config):
+        """Model status returns error when pull failed."""
+        web = _tmp_config[0]
+        web.app.state.pull_status["gemma3:1b"] = {
+            "status": "error",
+            "progress": "connection refused",
+        }
+
+        resp = client.get("/api/v1/models/gemma3:1b/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "error"

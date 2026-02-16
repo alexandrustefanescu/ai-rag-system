@@ -14,16 +14,6 @@ services:
       retries: 5
       start_period: 15s
 
-  ollama-pull:
-    image: ollama/ollama:latest
-    container_name: rag-ollama-pull
-    depends_on:
-      ollama:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c", "ollama pull gemma3:1b && ollama pull llama3.2:1b"]
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-
   rag:
     build:
       context: .
@@ -33,12 +23,11 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8443:8443"
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - CHUNK_STRATEGY=semantic
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db

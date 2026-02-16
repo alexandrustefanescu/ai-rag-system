@@ -260,16 +260,6 @@ services:
       retries: 5
       start_period: 15s
 
-  ollama-pull:
-    image: ollama/ollama:latest
-    container_name: rag-ollama-pull
-    depends_on:
-      ollama:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c", "ollama pull gemma3:1b && ollama pull llama3.2:1b"]
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-
   rag:
     image: alexandrustefanescu/ai-rag-system:latest
     container_name: rag-app
@@ -277,8 +267,6 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8443:8443"
     environment:
@@ -330,5 +318,4 @@ echo "  │                                                     │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 
-info "AI models are downloading in the background (~1-2 GB)."
-info "The app will be fully ready in a few minutes."
+info "Open the web UI and use the Models panel to download an AI model."

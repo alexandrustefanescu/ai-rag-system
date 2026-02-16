@@ -6,45 +6,95 @@
     <title>RAG System</title>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <header>
-        <h1>RAG System</h1>
-        <div class="status-bar">
-            <span>
-                <select id="model-select"><option>Loading...</option></select>
-            </span>
-            <span id="doc-count">-- chunks</span>
-            <input type="file" id="file-input" multiple accept=".txt,.md,.pdf" style="display:none"
-                   onchange="uploadFiles()">
-            <button class="btn secondary" id="upload-btn" onclick="document.getElementById('file-input').click()">
-                Upload
-            </button>
-            <button class="btn secondary" onclick="toggleDocPanel()">
-                Manage
-            </button>
-        </div>
-    </header>
+    <!-- Sidebar toggle (visible on mobile or when sidebar hidden) -->
+    <button class="sidebar-toggle" id="sidebar-toggle"
+            onclick="toggleSidebar()">&#9776;</button>
 
-    <div id="doc-panel">
-        <div class="panel-header">
-            <span>Documents</span>
-            <button class="btn secondary" onclick="toggleDocPanel()" style="padding:4px 10px;font-size:12px;">Close</button>
+    <!-- History sidebar -->
+    <aside id="sidebar" class="sidebar open">
+        <div class="sidebar-header">
+            <span class="sidebar-title">History</span>
+            <button class="btn sidebar-new"
+                    onclick="newChat()">+ New</button>
         </div>
-        <div class="panel-body" id="doc-list"></div>
-    </div>
+        <div class="sidebar-list" id="sidebar-list"></div>
+    </aside>
 
-    <div id="chat">
-        <div class="empty-state" id="empty-state">
-            Ask a question about your documents.<br>
-            Upload .txt, .md, or .pdf files to get started.
+    <div class="main-area" id="main-area">
+        <header>
+            <h1>RAG System</h1>
+            <div class="status-bar">
+                <span>
+                    <select id="model-select">
+                        <option>Loading...</option>
+                    </select>
+                </span>
+                <span id="doc-count">-- chunks</span>
+                <input type="file" id="file-input"
+                       multiple accept=".txt,.md,.pdf"
+                       style="display:none"
+                       onchange="uploadFiles()">
+                <button class="btn secondary"
+                        onclick="toggleDocPanel()">
+                    Documents
+                </button>
+                <button class="btn secondary"
+                        onclick="toggleModelPanel()">
+                    Models
+                </button>
+            </div>
+        </header>
+
+        <div id="doc-panel">
+            <div class="panel-header">
+                <span>Documents</span>
+                <div class="panel-actions">
+                    <button class="btn"
+                            id="upload-btn"
+                            onclick="document.getElementById('file-input').click()"
+                            style="padding:4px 10px;font-size:12px;">
+                        + Add
+                    </button>
+                    <button class="btn secondary"
+                            onclick="toggleDocPanel()"
+                            style="padding:4px 10px;font-size:12px;">
+                        Close
+                    </button>
+                </div>
+            </div>
+            <div class="panel-body" id="doc-list"></div>
         </div>
-    </div>
 
-    <div class="input-area">
-        <input type="text" id="question" placeholder="Ask a question..."
-               onkeydown="if(event.key==='Enter') askQuestion()" autofocus>
-        <button class="btn" id="send-btn" onclick="askQuestion()">Send</button>
+        <div id="model-panel">
+            <div class="panel-header">
+                <span>Models</span>
+                <button class="btn secondary"
+                        onclick="toggleModelPanel()"
+                        style="padding:4px 10px;font-size:12px;">
+                    Close
+                </button>
+            </div>
+            <div class="panel-body" id="model-list"></div>
+        </div>
+
+        <div id="chat">
+            <div class="empty-state" id="empty-state">
+                Ask a question about your documents.<br>
+                Upload .txt, .md, or .pdf files
+                to get started.
+            </div>
+        </div>
+
+        <div class="input-area">
+            <textarea id="question"
+                      placeholder="Ask a question... (Shift+Enter for new line)"
+                      rows="1" autofocus></textarea>
+            <button class="btn" id="send-btn"
+                    onclick="askQuestion()">Send</button>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>
