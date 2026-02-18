@@ -39,6 +39,7 @@ echo "  │     - Docker images (rag-system, ollama)            │"
 echo "  │     - Docker volumes (chroma_data, ollama_data)     │"
 echo "  │     - Install directory: $INSTALL_DIR"
 echo "  │                                                     │"
+echo "  │                                                     │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 

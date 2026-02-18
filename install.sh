@@ -271,6 +271,7 @@ services:
       - "127.0.0.1:8443:8443"
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - CHUNK_STRATEGY=semantic
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
