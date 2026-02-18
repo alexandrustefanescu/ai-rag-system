@@ -250,7 +250,7 @@ services:
     container_name: rag-ollama
     restart: unless-stopped
     ports:
-      - "127.0.0.1:11434:11434"
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -268,7 +268,7 @@ services:
       ollama:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8443:8443"
+      - "8443:8443"
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - CHUNK_STRATEGY=semantic
