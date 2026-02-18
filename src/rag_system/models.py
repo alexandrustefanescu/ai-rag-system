@@ -29,8 +29,18 @@ class RetrievedContext:
 
 
 @dataclass(frozen=True)
+class GenerationMetrics:
+    """Performance metrics captured during LLM generation."""
+
+    duration_s: float
+    tokens_generated: int
+    tokens_per_second: float
+
+
+@dataclass(frozen=True)
 class RAGResponse:
     """The final response from the RAG pipeline."""
 
     answer: str
     contexts: list[RetrievedContext] = field(default_factory=list)
+    metrics: GenerationMetrics | None = None

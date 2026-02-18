@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -67,9 +68,16 @@ class SourceResponse(BaseModel):
     relevance: float
 
 
+class GenerationMetricsResponse(BaseModel):
+    duration_s: float
+    tokens_generated: int
+    tokens_per_second: float
+
+
 class AskResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
+    metrics: GenerationMetricsResponse | None = None
 
 
 class IngestResponse(BaseModel):
@@ -336,7 +344,59 @@ def api_ask(body: AskRequest, collection=Depends(get_collection)):
         for ctx in response.contexts
     ]
 
-    return AskResponse(answer=response.answer, sources=sources)
+    metrics = None
+    if response.metrics:
+        metrics = GenerationMetricsResponse(
+            duration_s=response.metrics.duration_s,
+            tokens_generated=response.metrics.tokens_generated,
+            tokens_per_second=response.metrics.tokens_per_second,
+        )
+
+    return AskResponse(answer=response.answer, sources=sources, metrics=metrics)
+
+
+@router.post("/ask/stream")
+def api_ask_stream(
+    body: AskRequest,
+    collection=Depends(get_collection),
+):
+    if collection is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Vector store not initialized. Ingest documents first.",
+        )
+
+    llm_config = _config.llm
+    if body.model and body.model in _config.llm.available_models:
+        llm_config = _config.llm.model_copy(
+            update={"model": body.model}
+        )
+
+    selected_model = llm_config.model
+    _, downloaded = _get_downloaded_models()
+    if not any(
+        selected_model == d or d.startswith(selected_model + ":")
+        for d in downloaded
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{selected_model}' is not downloaded. "
+            "Pull it from the Models panel first.",
+        )
+
+    return StreamingResponse(
+        rag_engine.stream_answer(
+            body.question,
+            collection,
+            config=llm_config,
+            n_results=_config.vector_store.query_results,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _get_downloaded_models() -> tuple[bool, list[str]]:

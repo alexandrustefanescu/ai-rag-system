@@ -93,7 +93,7 @@ function deleteConversation(id) {
     renderSidebar();
 }
 
-function appendMessage(id, role, content, sources) {
+function appendMessage(id, role, content, sources, metrics) {
     var convos = loadConversations();
     var convo = convos[id];
     if (!convo) return;
@@ -101,7 +101,8 @@ function appendMessage(id, role, content, sources) {
     convo.messages.push({
         role: role,
         content: content,
-        sources: sources || null
+        sources: sources || null,
+        metrics: metrics || null
     });
 
     // Auto-title from first user message.
@@ -207,7 +208,8 @@ function switchToChat(id) {
     var msgs = getMessages(id);
     msgs.forEach(function(msg) {
         addMessage(
-            msg.role, msg.content, msg.sources, true
+            msg.role, msg.content, msg.sources,
+            msg.metrics, true
         );
     });
 
@@ -340,7 +342,7 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function addMessage(role, content, sources, skipSave) {
+function addMessage(role, content, sources, metrics, skipSave) {
     clearEmptyState();
 
     var div = document.createElement("div");
@@ -349,6 +351,15 @@ function addMessage(role, content, sources, skipSave) {
     if (role === "assistant") {
         var html = '<div class="answer">'
             + renderMarkdown(content) + "</div>";
+        if (metrics) {
+            html += '<div class="metrics-bar">'
+                + metrics.tokens_per_second.toFixed(1)
+                + " tok/s &middot; "
+                + metrics.tokens_generated
+                + " tokens &middot; "
+                + metrics.duration_s.toFixed(1) + "s"
+                + "</div>";
+        }
         if (sources && sources.length > 0) {
             html += '<details class="sources">'
                 + "<summary>Sources ("
@@ -382,7 +393,7 @@ function addMessage(role, content, sources, skipSave) {
         if (!activeId) {
             activeId = newChat();
         }
-        appendMessage(activeId, role, content, sources);
+        appendMessage(activeId, role, content, sources, metrics);
     }
 }
 
@@ -410,21 +421,129 @@ function addErrorMessage(content) {
     scrollToBottom();
 }
 
+var _thinkingInterval = null;
+var _thinkingWords = [
+    "Thinking", "Analyzing", "Reasoning",
+    "Processing", "Reviewing", "Evaluating",
+    "Searching", "Considering", "Reflecting",
+    "Exploring", "Reading", "Summarizing"
+];
+
+function _cycleThinkingLabel() {
+    var label = document.querySelector(
+        "#thinking .thinking-label"
+    );
+    if (!label) return;
+    label.style.opacity = "0";
+    setTimeout(function() {
+        var words = _thinkingWords;
+        var current = label.textContent;
+        var next;
+        do {
+            next = words[
+                Math.floor(Math.random() * words.length)
+            ];
+        } while (next === current && words.length > 1);
+        label.textContent = next;
+        label.style.opacity = "1";
+    }, 300);
+}
+
 function showThinking() {
     clearEmptyState();
     var div = document.createElement("div");
     div.className = "thinking";
     div.id = "thinking";
     div.innerHTML =
-        '<span class="spinner"></span> Thinking...';
+        '<span class="thinking-label">Thinking</span>'
+        + '<span class="thinking-dots">'
+        + "<span></span><span></span><span></span>"
+        + "</span>";
     chat.appendChild(div);
     scrollToBottom();
+    _thinkingInterval = setInterval(
+        _cycleThinkingLabel, 2000
+    );
 }
 
 function hideThinking() {
+    clearInterval(_thinkingInterval);
+    _thinkingInterval = null;
     var el = document.getElementById("thinking");
     if (el) el.remove();
 }
+
+/* ── Streaming DOM helpers ───────────────────────────────────── */
+
+function createStreamingDiv() {
+    clearEmptyState();
+    var div = document.createElement("div");
+    div.className = "message assistant";
+    var answerDiv = document.createElement("div");
+    answerDiv.className = "answer";
+    div.appendChild(answerDiv);
+    chat.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+function updateStreamingDiv(div, rawText) {
+    var answerDiv = div.querySelector(".answer");
+    answerDiv.innerHTML =
+        renderMarkdown(rawText)
+        + '<span class="cursor"></span>';
+    scrollToBottom();
+}
+
+function finalizeStreamingDiv(div, rawText, sources, metrics) {
+    var answerDiv = div.querySelector(".answer");
+    answerDiv.innerHTML = renderMarkdown(rawText);
+    addCopyButtons(answerDiv);
+
+    if (metrics) {
+        var bar = document.createElement("div");
+        bar.className = "metrics-bar";
+        bar.innerHTML =
+            metrics.tokens_per_second.toFixed(1)
+            + " tok/s &middot; "
+            + metrics.tokens_generated
+            + " tokens &middot; "
+            + metrics.duration_s.toFixed(1) + "s";
+        div.appendChild(bar);
+    }
+
+    if (sources && sources.length > 0) {
+        var details = document.createElement("details");
+        details.className = "sources";
+        var summary = document.createElement("summary");
+        summary.textContent =
+            "Sources (" + sources.length + ")";
+        details.appendChild(summary);
+        sources.forEach(function(s) {
+            var item = document.createElement("div");
+            item.className = "source-item";
+            var meta = document.createElement("div");
+            meta.className = "meta";
+            meta.innerHTML =
+                escapeHtml(s.source)
+                + " &middot; relevance: "
+                + s.relevance.toFixed(2);
+            item.appendChild(meta);
+            var preview = s.text.length > 200
+                ? s.text.substring(0, 200) + "..."
+                : s.text;
+            item.appendChild(
+                document.createTextNode(preview)
+            );
+            details.appendChild(item);
+        });
+        div.appendChild(details);
+    }
+
+    scrollToBottom();
+}
+
+/* ── Ask (streaming) ─────────────────────────────────────────── */
 
 async function askQuestion(retryText) {
     var q = retryText || input.value.trim();
@@ -441,7 +560,6 @@ async function askQuestion(retryText) {
         if (errMsg) errMsg.remove();
     }
 
-    // Ensure we have an active conversation.
     if (!getActiveId()) {
         newChat();
     }
@@ -450,8 +568,13 @@ async function askQuestion(retryText) {
     if (!retryText) addMessage("user", q);
     showThinking();
 
+    var msgDiv = null;
+    var rawText = "";
+    var finalSources = null;
+    var finalMetrics = null;
+
     try {
-        var res = await fetch("/api/v1/ask", {
+        var res = await fetch("/api/v1/ask/stream", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -461,18 +584,66 @@ async function askQuestion(retryText) {
                 model: modelSelect.value
             }),
         });
+
         if (!res.ok) {
-            var data = await res.json().catch(
+            var errData = await res.json().catch(
                 function() { return {}; }
             );
             throw new Error(
-                data.detail || res.statusText
+                errData.detail || res.statusText
             );
         }
-        var data = await res.json();
-        addMessage(
-            "assistant", data.answer, data.sources
+
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = "";
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buf += decoder.decode(
+                chunk.value, { stream: true }
+            );
+            var lines = buf.split("\n");
+            buf = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (!line.startsWith("data: ")) continue;
+                var evt;
+                try {
+                    evt = JSON.parse(line.slice(6));
+                } catch (e) { continue; }
+
+                if (evt.type === "token") {
+                    if (!msgDiv) {
+                        hideThinking();
+                        msgDiv = createStreamingDiv();
+                    }
+                    rawText += evt.text;
+                    updateStreamingDiv(msgDiv, rawText);
+                } else if (evt.type === "done") {
+                    finalSources = evt.sources;
+                    finalMetrics = evt.metrics;
+                } else if (evt.type === "error") {
+                    throw new Error(evt.message);
+                }
+            }
+        }
+
+        if (msgDiv) {
+            finalizeStreamingDiv(
+                msgDiv, rawText, finalSources, finalMetrics
+            );
+        }
+
+        var activeId = getActiveId();
+        if (!activeId) activeId = newChat();
+        appendMessage(
+            activeId, "assistant",
+            rawText, finalSources, finalMetrics
         );
+
     } catch (err) {
         addErrorMessage("Error: " + err.message);
     } finally {

@@ -1,14 +1,17 @@
 """RAG engine — retrieves context from the vector store and
 generates answers via Ollama."""
 
+import json
 import logging
 import re
+import time
+from collections.abc import Generator
 
 import ollama
 
 from rag_system import vector_store as vs
 from rag_system.config import LLMConfig
-from rag_system.models import RAGResponse, RetrievedContext
+from rag_system.models import GenerationMetrics, RAGResponse, RetrievedContext
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +212,16 @@ def _rerank_contexts(contexts: list[RetrievedContext]) -> list[RetrievedContext]
     return primary + secondary
 
 
-def generate_answer(query: str, context: str, config: LLMConfig | None = None) -> str:
+def generate_answer(
+    query: str,
+    context: str,
+    config: LLMConfig | None = None,
+) -> tuple[str, GenerationMetrics]:
     """Generate an answer using the Ollama LLM.
 
     Sends a system prompt and a user prompt (context + question) to
-    the configured Ollama model and returns the generated text.
+    the configured Ollama model and returns the generated text plus
+    performance metrics.
 
     Args:
         query: The user's question.
@@ -222,11 +230,12 @@ def generate_answer(query: str, context: str, config: LLMConfig | None = None) -
             Uses defaults if not provided.
 
     Returns:
-        The model's generated answer as a string.
+        A tuple of (answer_text, GenerationMetrics).
     """
     cfg = config or LLMConfig()
     user_prompt = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
 
+    t0 = time.perf_counter()
     response = ollama.chat(
         model=cfg.model,
         messages=[
@@ -235,7 +244,22 @@ def generate_answer(query: str, context: str, config: LLMConfig | None = None) -
         ],
         options={"temperature": cfg.temperature, "num_predict": cfg.max_tokens},
     )
-    return response["message"]["content"]
+    duration_s = time.perf_counter() - t0
+
+    eval_count: int = getattr(response, "eval_count", 0) or 0
+    eval_duration_ns: int = getattr(response, "eval_duration", 0) or 0
+    tokens_per_second = (
+        eval_count / (eval_duration_ns / 1_000_000_000)
+        if eval_duration_ns > 0
+        else 0.0
+    )
+
+    metrics = GenerationMetrics(
+        duration_s=round(duration_s, 2),
+        tokens_generated=eval_count,
+        tokens_per_second=round(tokens_per_second, 1),
+    )
+    return response["message"]["content"], metrics
 
 
 _RELEVANCE_THRESHOLD = 0.5
@@ -284,6 +308,111 @@ def ask(
 
     contexts = _rerank_contexts(contexts)
     context_str = _build_context_string(contexts)
-    answer = generate_answer(query, context_str, config)
+    answer, metrics = generate_answer(query, context_str, config)
 
-    return RAGResponse(answer=answer, contexts=contexts)
+    return RAGResponse(answer=answer, contexts=contexts, metrics=metrics)
+
+
+def stream_answer(
+    query: str,
+    collection,
+    config: LLMConfig | None = None,
+    n_results: int = 5,
+) -> Generator[str, None, None]:
+    """Stream the RAG pipeline response as SSE-formatted strings.
+
+    Yields SSE lines ready to forward to the client:
+    - ``data: {"type": "token", "text": "..."}``
+    - ``data: {"type": "done", "sources": [...], "metrics": {...}}``
+    - ``data: {"type": "error", "message": "..."}``
+
+    Args:
+        query: The user's natural-language question.
+        collection: ChromaDB collection to search.
+        config: LLM settings. Uses defaults if not provided.
+        n_results: Number of context chunks to retrieve.
+    """
+
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    if _detect_injection(query):
+        logger.warning("Blocked injection attempt: %s", query[:80])
+        yield _sse({"type": "token", "text": _INJECTION_REFUSAL})
+        yield _sse({"type": "done", "sources": [], "metrics": None})
+        return
+
+    clean_query = _preprocess_query(query)
+    search_query = clean_query or query
+
+    results = vs.query(collection, search_query, n_results=n_results)
+    contexts = _parse_results(results)
+    contexts = [c for c in contexts if c.relevance >= _RELEVANCE_THRESHOLD]
+
+    if not contexts:
+        msg = (
+            "No relevant documents found. "
+            "Try ingesting documents first."
+        )
+        yield _sse({"type": "token", "text": msg})
+        yield _sse({"type": "done", "sources": [], "metrics": None})
+        return
+
+    contexts = _rerank_contexts(contexts)
+    context_str = _build_context_string(contexts)
+
+    cfg = config or LLMConfig()
+    user_prompt = (
+        f"Context:\n{context_str}\n\nQuestion: {query}\n\nAnswer:"
+    )
+
+    t0 = time.perf_counter()
+    last_chunk = None
+    try:
+        stream = ollama.chat(
+            model=cfg.model,
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            options={
+                "temperature": cfg.temperature,
+                "num_predict": cfg.max_tokens,
+            },
+            stream=True,
+        )
+        for chunk in stream:
+            token = chunk["message"]["content"]
+            if token:
+                yield _sse({"type": "token", "text": token})
+            last_chunk = chunk
+    except Exception as exc:
+        logger.exception("Streaming error: %s", exc)
+        yield _sse({"type": "error", "message": str(exc)})
+        return
+
+    duration_s = time.perf_counter() - t0
+    eval_count: int = getattr(last_chunk, "eval_count", 0) or 0
+    eval_duration_ns: int = getattr(last_chunk, "eval_duration", 0) or 0
+    tokens_per_second = (
+        eval_count / (eval_duration_ns / 1_000_000_000)
+        if eval_duration_ns > 0
+        else 0.0
+    )
+
+    sources = [
+        {"text": ctx.text, "source": ctx.source, "relevance": ctx.relevance}
+        for ctx in contexts
+    ]
+
+    yield _sse(
+        {
+            "type": "done",
+            "sources": sources,
+            "metrics": {
+                "duration_s": round(duration_s, 2),
+                "tokens_generated": eval_count,
+                "tokens_per_second": round(tokens_per_second, 1),
+            },
+        }
+    )
