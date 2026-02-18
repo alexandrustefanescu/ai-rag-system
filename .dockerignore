@@ -8,3 +8,13 @@ chroma_db/
 *.egg-info/
 dist/
 build/
+backups/
+certs/
+docs/
+.DS_Store
+logs/
+.coverage
+tests/
+.claude/
+.cursor/
+.agents/

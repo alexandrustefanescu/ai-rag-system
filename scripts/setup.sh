@@ -18,11 +18,11 @@ uv pip install -e ".[dev]"
 
 # Check for Ollama
 if command -v ollama &>/dev/null; then
-    echo "🤖 Pulling tinyllama model..."
-    ollama pull tinyllama
+    echo "🤖 Pulling gemma3:1b model..."
+    ollama pull gemma3:1b
 else
     echo "⚠️  Ollama not found. Install it from https://ollama.com"
-    echo "   Then run: ollama pull tinyllama"
+    echo "   Then run: ollama pull gemma3:1b"
 fi
 
 echo ""

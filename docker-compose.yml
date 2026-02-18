@@ -2,31 +2,38 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: rag-ollama
+    restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
 
   rag:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rag-app
+    restart: unless-stopped
     depends_on:
       ollama:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:8443:8443"
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - CHUNK_STRATEGY=semantic
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
-    stdin_open: true
-    tty: true
+      # Mount your own cert.pem + key.pem here for production.
+      # If empty, the entrypoint auto-generates self-signed certs on startup.
+      - ./certs:/app/certs
 
 volumes:
   ollama_data:
