@@ -44,7 +44,9 @@ Supported formats: `.txt`, `.pdf`, `.md`
 ## Web Interface
 
 - **Chat** -- ask questions and get answers with source citations
+- **Chat history** -- multiple conversations stored locally, with titles and timestamps
 - **Model selector** -- switch between gemma3:1b, llama3.2:1b, etc.
+- **Models panel** -- download and delete Ollama models from the UI
 - **Upload** -- drag-and-drop files to ingest
 - **Document management** -- view indexed files, chunk counts, delete documents
 
@@ -52,15 +54,19 @@ Supported formats: `.txt`, `.pdf`, `.md`
 
 Interactive docs at https://localhost:8443/api/docs
 
-| Method   | Endpoint                        | Description                    |
-|----------|---------------------------------|--------------------------------|
-| `GET`    | `/api/v1/health`                | Health check                   |
-| `GET`    | `/api/v1/status`                | System status                  |
-| `POST`   | `/api/v1/ask`                   | Ask a question                 |
-| `POST`   | `/api/v1/upload`                | Upload documents               |
-| `POST`   | `/api/v1/ingest`                | Re-ingest documents folder     |
-| `GET`    | `/api/v1/documents`             | List indexed documents         |
-| `DELETE` | `/api/v1/documents/{filename}`  | Delete a document              |
+| Method   | Endpoint                           | Description                    |
+|----------|------------------------------------|--------------------------------|
+| `GET`    | `/api/v1/health`                   | Health check                   |
+| `GET`    | `/api/v1/status`                   | System status                  |
+| `POST`   | `/api/v1/ask`                      | Ask a question                 |
+| `POST`   | `/api/v1/upload`                   | Upload documents               |
+| `POST`   | `/api/v1/ingest`                   | Re-ingest documents folder     |
+| `GET`    | `/api/v1/documents`                | List indexed documents         |
+| `DELETE` | `/api/v1/documents/{filename}`     | Delete a document              |
+| `GET`    | `/api/v1/models`                   | List available/downloaded models |
+| `POST`   | `/api/v1/models/pull`              | Download a model               |
+| `GET`    | `/api/v1/models/{model_name}/status` | Check model pull status      |
+| `DELETE` | `/api/v1/models/{model_name}`      | Delete a downloaded model      |
 
 ```bash
 # Ask a question
