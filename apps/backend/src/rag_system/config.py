@@ -87,3 +87,13 @@ class AppConfig(BaseSettings):
     vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     ssl: SSLConfig = Field(default_factory=SSLConfig)
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://frontend:3000"]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_origins(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v  # type: ignore[return-value]

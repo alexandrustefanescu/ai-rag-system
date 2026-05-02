@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from rag_system import rag_engine
@@ -19,9 +19,6 @@ from rag_system.text_chunker import chunk_documents
 logger = logging.getLogger(__name__)
 
 _config = AppConfig()
-
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -42,7 +39,14 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_config.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -368,15 +372,12 @@ def api_ask_stream(
 
     llm_config = _config.llm
     if body.model and body.model in _config.llm.available_models:
-        llm_config = _config.llm.model_copy(
-            update={"model": body.model}
-        )
+        llm_config = _config.llm.model_copy(update={"model": body.model})
 
     selected_model = llm_config.model
     _, downloaded = _get_downloaded_models()
     if not any(
-        selected_model == d or d.startswith(selected_model + ":")
-        for d in downloaded
+        selected_model == d or d.startswith(selected_model + ":") for d in downloaded
     ):
         raise HTTPException(
             status_code=400,
@@ -557,6 +558,3 @@ def api_delete_model(model_name: str, request: Request):
 
 
 app.include_router(router)
-
-# Serve index.html as a static file (must be last — catches all unmatched paths)
-app.mount("/", StaticFiles(directory=str(TEMPLATES_DIR), html=True), name="ui")

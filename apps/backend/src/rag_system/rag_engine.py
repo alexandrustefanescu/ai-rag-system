@@ -249,9 +249,7 @@ def generate_answer(
     eval_count: int = getattr(response, "eval_count", 0) or 0
     eval_duration_ns: int = getattr(response, "eval_duration", 0) or 0
     tokens_per_second = (
-        eval_count / (eval_duration_ns / 1_000_000_000)
-        if eval_duration_ns > 0
-        else 0.0
+        eval_count / (eval_duration_ns / 1_000_000_000) if eval_duration_ns > 0 else 0.0
     )
 
     metrics = GenerationMetrics(
@@ -350,10 +348,7 @@ def stream_answer(
     contexts = [c for c in contexts if c.relevance >= _RELEVANCE_THRESHOLD]
 
     if not contexts:
-        msg = (
-            "No relevant documents found. "
-            "Try ingesting documents first."
-        )
+        msg = "No relevant documents found. Try ingesting documents first."
         yield _sse({"type": "token", "text": msg})
         yield _sse({"type": "done", "sources": [], "metrics": None})
         return
@@ -362,9 +357,7 @@ def stream_answer(
     context_str = _build_context_string(contexts)
 
     cfg = config or LLMConfig()
-    user_prompt = (
-        f"Context:\n{context_str}\n\nQuestion: {query}\n\nAnswer:"
-    )
+    user_prompt = f"Context:\n{context_str}\n\nQuestion: {query}\n\nAnswer:"
 
     t0 = time.perf_counter()
     last_chunk = None
@@ -395,9 +388,7 @@ def stream_answer(
     eval_count: int = getattr(last_chunk, "eval_count", 0) or 0
     eval_duration_ns: int = getattr(last_chunk, "eval_duration", 0) or 0
     tokens_per_second = (
-        eval_count / (eval_duration_ns / 1_000_000_000)
-        if eval_duration_ns > 0
-        else 0.0
+        eval_count / (eval_duration_ns / 1_000_000_000) if eval_duration_ns > 0 else 0.0
     )
 
     sources = [

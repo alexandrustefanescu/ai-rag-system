@@ -2004,7 +2004,6 @@ source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
     { name = "fastapi" },
-    { name = "jinja2" },
     { name = "markdown" },
     { name = "ollama" },
     { name = "pydantic" },
@@ -2029,7 +2028,6 @@ requires-dist = [
     { name = "chromadb", specifier = ">=0.4.22" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "jinja2", specifier = ">=3.1.0" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "ollama", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2.0" },
