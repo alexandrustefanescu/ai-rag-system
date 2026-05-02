@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@import "@rag/tailwind-config/theme.css";
+
+* {
+  box-sizing: border-box;
+}
