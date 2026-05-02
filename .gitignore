@@ -12,7 +12,7 @@ certs/
 backups/
 .DS_Store
 logs/
-documents/
+apps/backend/documents/
 node_modules/
 .next/
 .turbo/
