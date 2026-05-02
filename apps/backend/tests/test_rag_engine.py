@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rag_system.config import LLMConfig
-from rag_system.models import RAGResponse, RetrievedContext
+from rag_system.models import GenerationMetrics, RAGResponse, RetrievedContext
 from rag_system.rag_engine import (
     _INJECTION_REFUSAL,
     _build_context_string,
@@ -16,6 +16,10 @@ from rag_system.rag_engine import (
     _text_overlap,
     ask,
     generate_answer,
+)
+
+_ZERO_METRICS = GenerationMetrics(
+    duration_s=0.0, tokens_generated=0, tokens_per_second=0.0
 )
 
 
@@ -70,7 +74,7 @@ class TestGenerateAnswer:
         mock_ollama.chat.return_value = {"message": {"content": "Test answer"}}
         config = LLMConfig(model="testmodel", temperature=0.5, max_tokens=256)
 
-        answer = generate_answer("What is Python?", "Python is a language.", config)
+        answer, _ = generate_answer("What is Python?", "Python is a language.", config)
 
         assert answer == "Test answer"
         mock_ollama.chat.assert_called_once()
@@ -95,7 +99,7 @@ class TestAsk:
             "metadatas": [[{"source": "docs.txt"}]],
             "distances": [[0.15]],
         }
-        mock_generate.return_value = "Python is great!"
+        mock_generate.return_value = ("Python is great!", _ZERO_METRICS)
 
         collection = MagicMock()
         response = ask("Tell me about Python", collection)
@@ -126,7 +130,7 @@ class TestAsk:
             "metadatas": [[{"source": "high.txt"}, {"source": "low.txt"}]],
             "distances": [[0.1, 0.9]],  # 0.9 distance = 0.1 relevance (below 0.5)
         }
-        mock_generate.return_value = "Answer from high relevance doc"
+        mock_generate.return_value = ("Answer from high relevance doc", _ZERO_METRICS)
         collection = MagicMock()
         response = ask("test query", collection)
 
@@ -158,7 +162,7 @@ class TestAsk:
             "metadatas": [[{"source": "test.txt"}]],
             "distances": [[0.1]],
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
 
         collection = MagicMock()
         ask("query", collection, n_results=10)
@@ -176,7 +180,7 @@ class TestAsk:
             "metadatas": [[{"source": "test.txt"}]],
             "distances": [[0.1]],
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
 
         collection = MagicMock()
         custom_config = LLMConfig(model="custom-model")
@@ -206,7 +210,7 @@ class TestRelevanceThreshold:
             "metadatas": [[{"source": "edge.txt"}]],
             "distances": [[0.5]],  # 1 - 0.5 = 0.5 relevance
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
         collection = MagicMock()
         response = ask("query", collection)
 
@@ -243,7 +247,7 @@ class TestRelevanceThreshold:
             "distances": [[0.2, 0.5, 0.7]],
             # relevances: 0.8, 0.5, 0.3
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
         collection = MagicMock()
         response = ask("query", collection)
 
@@ -371,7 +375,7 @@ class TestAskInjectionBlocking:
             "metadatas": [[{"source": "test.txt"}]],
             "distances": [[0.1]],
         }
-        mock_generate.return_value = "Normal answer"
+        mock_generate.return_value = ("Normal answer", _ZERO_METRICS)
         collection = MagicMock()
 
         response = ask("What is Python?", collection)
@@ -624,7 +628,7 @@ class TestAskWithPreprocessing:
             "metadatas": [[{"source": "test.txt"}]],
             "distances": [[0.1]],
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
         collection = MagicMock()
 
         ask("  What is Python??  ", collection)
@@ -647,7 +651,7 @@ class TestAskWithPreprocessing:
             "metadatas": [[{"source": "test.txt"}]],
             "distances": [[0.1]],
         }
-        mock_generate.return_value = "Answer"
+        mock_generate.return_value = ("Answer", _ZERO_METRICS)
         collection = MagicMock()
 
         ask("What is Python?", collection)
