@@ -11,7 +11,6 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 
 INSTALL_DIR="${RAG_INSTALL_DIR:-$HOME/ai-rag-system}"
-IMAGE="alexandrustefanescu/ai-rag-system:latest"
 
 info()  { printf '\033[1;34m[INFO]\033[0m  %s\n' "$1"; }
 ok()    { printf '\033[1;32m[OK]\033[0m    %s\n' "$1"; }
@@ -197,6 +196,7 @@ check_port() {
     fi
 }
 
+check_port 3000
 check_port 8443
 check_port 11434
 
@@ -260,9 +260,9 @@ services:
       retries: 5
       start_period: 15s
 
-  rag:
-    image: alexandrustefanescu/ai-rag-system:latest
-    container_name: rag-app
+  backend:
+    image: alexandrustefanescu/ai-rag-system-backend:latest
+    container_name: rag-backend
     restart: unless-stopped
     depends_on:
       ollama:
@@ -272,10 +272,29 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - CHUNK_STRATEGY=semantic
+      - CORS_ORIGINS=http://localhost:3000
     volumes:
       - ./documents:/app/documents
       - chroma_data:/app/chroma_db
       - ./certs:/app/certs
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    image: alexandrustefanescu/ai-rag-system-frontend:latest
+    container_name: rag-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=https://localhost:8443
 
 volumes:
   ollama_data:
@@ -288,7 +307,8 @@ ok "docker-compose.yml created"
 
 info "Pulling Docker images (this may take a few minutes)..."
 run_docker pull ollama/ollama:latest
-run_docker pull "$IMAGE"
+run_docker pull alexandrustefanescu/ai-rag-system-backend:latest
+run_docker pull alexandrustefanescu/ai-rag-system-frontend:latest
 ok "Images pulled"
 
 # ── Start services ───────────────────────────────────────────────────────────
@@ -303,10 +323,8 @@ echo "  ┌───────────────────────
 echo "  │                                                     │"
 echo "  │   AI RAG System installed successfully!             │"
 echo "  │                                                     │"
-echo "  │   Open:  https://localhost:8443                     │"
-echo "  │                                                     │"
-echo "  │   Your browser will show a security warning         │"
-echo "  │   (self-signed cert) — click Advanced → Proceed.    │"
+echo "  │   Open:  http://localhost:3000                      │"
+echo "  │   API:   https://localhost:8443                     │"
 echo "  │                                                     │"
 echo "  │   Add documents to: ~/ai-rag-system/documents/     │"
 echo "  │                                                     │"
@@ -319,4 +337,4 @@ echo "  │                                                     │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 
-info "Open the web UI and use the Models panel to download an AI model."
+info "Open http://localhost:3000 and use the Models panel to download an AI model."

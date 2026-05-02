@@ -19,11 +19,11 @@ services:
       retries: 5
       start_period: 15s
 
-  rag:
+  backend:
     build:
       context: apps/backend
       dockerfile: Dockerfile
-    container_name: rag-app
+    container_name: rag-backend
     restart: unless-stopped
     depends_on:
       ollama:
@@ -33,12 +33,33 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - CHUNK_STRATEGY=semantic
+      - CORS_ORIGINS=http://localhost:3000
     volumes:
-      - ./documents:/app/documents
+      - ./apps/backend/documents:/app/documents
       - chroma_data:/app/chroma_db
       # Mount your own cert.pem + key.pem here for production.
       # If empty, the entrypoint auto-generates self-signed certs on startup.
       - ./certs:/app/certs
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: rag-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=https://localhost:8443
 
 volumes:
   ollama_data:

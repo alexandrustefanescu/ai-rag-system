@@ -34,7 +34,7 @@ echo "  │                                                     │"
 echo "  │   AI RAG System Uninstaller                         │"
 echo "  │                                                     │"
 echo "  │   This will remove:                                 │"
-echo "  │     - Docker containers (rag-app, rag-ollama)       │"
+echo "  │     - Docker containers (rag-frontend, rag-backend, rag-ollama) │"
 echo "  │     - Docker images (rag-system, ollama)            │"
 echo "  │     - Docker volumes (chroma_data, ollama_data)     │"
 echo "  │     - Install directory: $INSTALL_DIR"
@@ -59,7 +59,7 @@ if [ -f "$COMPOSE_FILE" ]; then
     ok "Containers stopped"
 else
     # Containers might exist without a compose file.
-    for name in rag-app rag-ollama; do
+    for name in rag-frontend rag-backend rag-ollama; do
         if run_docker ps -aq -f "name=$name" | grep -q .; then
             info "Removing container $name..."
             run_docker rm -f "$name" 2>/dev/null || true
@@ -79,10 +79,10 @@ ok "Volumes removed"
 
 # ── Remove Docker images ────────────────────────────────────────────────────
 
-read -rp "Remove Docker images (ollama, rag-system)? [y/N] " rm_images </dev/tty
+read -rp "Remove Docker images (ollama, backend, frontend)? [y/N] " rm_images </dev/tty
 case "$rm_images" in
     [yY]|[yY][eE][sS])
-        for img in alexandrustefanescu/ai-rag-system:latest ollama/ollama:latest; do
+        for img in alexandrustefanescu/ai-rag-system-backend:latest alexandrustefanescu/ai-rag-system-frontend:latest ollama/ollama:latest; do
             if run_docker images -q "$img" 2>/dev/null | grep -q .; then
                 info "Removing image $img..."
                 run_docker rmi "$img" 2>/dev/null || true
