@@ -21,7 +21,7 @@ services:
 
   rag:
     build:
-      context: .
+      context: apps/backend
       dockerfile: Dockerfile
     container_name: rag-app
     restart: unless-stopped

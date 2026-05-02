@@ -10,7 +10,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 # Copy dependency manifests first for better layer caching.
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock ./
 
 # Install third-party deps only (local package needs src/ which isn't here yet).
 # uv creates and manages a single .venv — no manual venv creation needed.
