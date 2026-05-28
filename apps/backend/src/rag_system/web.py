@@ -12,8 +12,11 @@ from pydantic import BaseModel
 
 from rag_system import rag_engine
 from rag_system import vector_store as vs
+from rag_system.auth.dependencies import get_current_user, get_user_id
 from rag_system.config import AppConfig
+from rag_system.database import create_db_and_tables, get_async_session
 from rag_system.document_loader import load_documents
+from rag_system.models.chat import Conversation, Message
 from rag_system.text_chunker import chunk_documents
 
 logger = logging.getLogger(__name__)
@@ -21,9 +24,15 @@ logger = logging.getLogger(__name__)
 _config = AppConfig()
 
 
+def _user_collection_name(user_id: str) -> str:
+    """Return a per-user ChromaDB collection name."""
+    return f"rag_documents_{user_id}"
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Initialize ChromaDB client and collection on startup."""
+    """Initialize database, ChromaDB client and collection on startup."""
+    await create_db_and_tables()
     client = vs.get_client(_config.vector_store)
     collection = vs.get_or_create_collection(client, _config.vector_store)
     application.state.chroma_client = client
@@ -52,18 +61,30 @@ router = APIRouter(prefix="/api/v1")
 
 
 def get_collection(request: Request):
-    """FastAPI dependency — return the current ChromaDB collection from app state."""
+    """FastAPI dependency — return the default ChromaDB collection."""
     return getattr(request.app.state, "chroma_collection", None)
 
 
 def get_client(request: Request):
-    """FastAPI dependency — return the current ChromaDB client from app state."""
+    """FastAPI dependency — return the ChromaDB client."""
     return getattr(request.app.state, "chroma_client", None)
+
+
+def get_user_collection(request: Request, user_id: str = Depends(get_user_id)):
+    """Return a per-user ChromaDB collection."""
+    client = getattr(request.app.state, "chroma_client", None)
+    if client is None:
+        return None
+    cfg = _config.vector_store.model_copy(
+        update={"collection_name": _user_collection_name(user_id)}
+    )
+    return vs.get_or_create_collection(client, cfg)
 
 
 class AskRequest(BaseModel):
     question: str
     model: str | None = None
+    conversation_id: str | None = None
 
 
 class SourceResponse(BaseModel):
@@ -82,6 +103,7 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
     metrics: GenerationMetricsResponse | None = None
+    conversation_id: str | None = None
 
 
 class IngestResponse(BaseModel):
@@ -171,20 +193,39 @@ async def api_health(collection=Depends(get_collection)):
     )
 
 
+@router.get("/public")
+async def api_public():
+    """Public route - no authentication required."""
+    return {"message": "This is a public endpoint."}
+
+
+@router.get("/me")
+async def api_me(user: dict = Depends(get_current_user)):
+    """Protected route - returns the authenticated Clerk user ID."""
+    return {"user_id": user.get("sub")}
+
+
 @router.post("/ingest", response_model=IngestResponse)
 def api_ingest(
     request: Request,
-    collection=Depends(get_collection),
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
     client=Depends(get_client),
 ):
-    folder = _config.documents_dir
-    documents = load_documents(folder)
+    folder = Path(_config.documents_dir) / user_id
+    folder.mkdir(parents=True, exist_ok=True)
+    documents = load_documents(str(folder))
 
     if not documents:
         return IngestResponse(status="no_documents", chunks=0)
 
     chunks = chunk_documents(documents, _config.chunk)
-    collection = vs.reset_collection(client, _config.vector_store)
+    collection = vs.reset_collection(
+        client,
+        _config.vector_store.model_copy(
+            update={"collection_name": _user_collection_name(user_id)}
+        ),
+    )
     request.app.state.chroma_collection = collection
     added = vs.add_chunks(collection, chunks, _config.vector_store.batch_size)
 
@@ -198,18 +239,18 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 def api_upload(
     files: list[UploadFile],
     request: Request,
-    collection=Depends(get_collection),
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
     client=Depends(get_client),
 ):
-    docs_dir = Path(_config.documents_dir)
-    docs_dir.mkdir(parents=True, exist_ok=True)
+    user_docs_dir = Path(_config.documents_dir) / user_id
+    user_docs_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
-    docs_dir_resolved = docs_dir.resolve()
+    docs_dir_resolved = user_docs_dir.resolve()
     for file in files:
         if not file.filename:
             continue
-        # Use only the basename to prevent path traversal.
         safe_name = Path(file.filename).name
         if not safe_name:
             continue
@@ -221,8 +262,8 @@ def api_upload(
             dest.relative_to(docs_dir_resolved)
         except ValueError:
             continue
-        max_size = 50 * 1024 * 1024  # 50 MB limit per file
-        read_chunk = 1024 * 1024  # 1 MB read chunks
+        max_size = 50 * 1024 * 1024
+        read_chunk = 1024 * 1024
         total = 0
         parts: list[bytes] = []
         oversized = False
@@ -243,9 +284,14 @@ def api_upload(
     if saved == 0:
         return UploadResponse(status="no_valid_files", files_saved=0, chunks=0)
 
-    documents = load_documents(str(docs_dir))
+    documents = load_documents(str(user_docs_dir))
     chunks = chunk_documents(documents, _config.chunk)
-    collection = vs.reset_collection(client, _config.vector_store)
+    collection = vs.reset_collection(
+        client,
+        _config.vector_store.model_copy(
+            update={"collection_name": _user_collection_name(user_id)}
+        ),
+    )
     request.app.state.chroma_collection = collection
     added = vs.add_chunks(collection, chunks, _config.vector_store.batch_size)
 
@@ -253,10 +299,12 @@ def api_upload(
 
 
 @router.get("/documents", response_model=DocumentListResponse)
-def api_list_documents(collection=Depends(get_collection)):
+def api_list_documents(
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
+):
     files = []
 
-    # List documents from the vector store metadata (the source of truth).
     if collection and collection.count() > 0:
         result = collection.get(include=["metadatas"])
         sources: dict[str, int] = {}
@@ -264,9 +312,9 @@ def api_list_documents(collection=Depends(get_collection)):
             src = (meta or {}).get("source", "unknown")
             sources[src] = sources.get(src, 0) + 1
 
-        docs_dir = Path(_config.documents_dir)
+        user_docs_dir = Path(_config.documents_dir) / user_id
         for source, chunk_count in sorted(sources.items()):
-            path = docs_dir / source
+            path = user_docs_dir / source
             size_kb = round(path.stat().st_size / 1024, 1) if path.is_file() else 0
             files.append(
                 DocumentInfo(
@@ -280,21 +328,22 @@ def api_list_documents(collection=Depends(get_collection)):
 
 
 @router.delete("/documents/{filename}", response_model=DeleteResponse)
-def api_delete_document(filename: str, collection=Depends(get_collection)):
-    docs_dir = Path(_config.documents_dir).resolve()
-    target = (docs_dir / filename).resolve()
+def api_delete_document(
+    filename: str,
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
+):
+    user_docs_dir = Path(_config.documents_dir) / user_id
+    target = (user_docs_dir / filename).resolve()
 
-    # Prevent path traversal — target must be inside documents dir.
     try:
-        target.relative_to(docs_dir)
+        target.relative_to(user_docs_dir.resolve())
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    # Delete the file from disk if it exists.
     if target.is_file():
         target.unlink()
 
-    # Remove chunks with this source from the vector store.
     if collection and collection.count() > 0:
         result = collection.get(include=["metadatas"])
         ids_to_delete = [
@@ -313,7 +362,11 @@ def api_delete_document(filename: str, collection=Depends(get_collection)):
 
 
 @router.post("/ask", response_model=AskResponse)
-def api_ask(body: AskRequest, collection=Depends(get_collection)):
+def api_ask(
+    body: AskRequest,
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
+):
     if collection is None:
         raise HTTPException(
             status_code=503,
@@ -324,7 +377,6 @@ def api_ask(body: AskRequest, collection=Depends(get_collection)):
     if body.model and body.model in _config.llm.available_models:
         llm_config = _config.llm.model_copy(update={"model": body.model})
 
-    # Check that the selected model is actually downloaded.
     selected_model = llm_config.model
     _, downloaded = _get_downloaded_models()
     if not any(
@@ -356,13 +408,19 @@ def api_ask(body: AskRequest, collection=Depends(get_collection)):
             tokens_per_second=response.metrics.tokens_per_second,
         )
 
-    return AskResponse(answer=response.answer, sources=sources, metrics=metrics)
+    return AskResponse(
+        answer=response.answer,
+        sources=sources,
+        metrics=metrics,
+        conversation_id=body.conversation_id,
+    )
 
 
 @router.post("/ask/stream")
 def api_ask_stream(
     body: AskRequest,
-    collection=Depends(get_collection),
+    user_id: str = Depends(get_user_id),
+    collection=Depends(get_user_collection),
 ):
     if collection is None:
         raise HTTPException(
@@ -429,7 +487,6 @@ def api_status(collection=Depends(get_collection)):
 def api_list_models():
     connected, downloaded = _get_downloaded_models()
 
-    # Build a size lookup from downloaded models.
     size_map: dict[str, float] = {}
     if connected:
         try:
@@ -512,7 +569,6 @@ def api_model_status(model_name: str, request: Request):
     info = pull_status.get(model_name)
 
     if info is None:
-        # Check if already downloaded.
         _, downloaded = _get_downloaded_models()
         is_downloaded = any(
             model_name == d or d.startswith(model_name + ":") for d in downloaded
@@ -550,11 +606,126 @@ def api_delete_model(model_name: str, request: Request):
             detail=f"Failed to delete model: {exc}",
         )
 
-    # Clear any stale pull status for this model.
     pull_status = getattr(request.app.state, "pull_status", {})
     pull_status.pop(model_name, None)
 
     return DeleteModelResponse(status="ok")
+
+
+# --- Chat History Endpoints ---
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str | None = None
+
+
+class ConversationResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class MessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    sources: str | None = None
+    created_at: str
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationResponse]
+
+
+@router.get("/conversations", response_model=ConversationListResponse)
+async def api_list_conversations(
+    user_id: str = Depends(get_user_id),
+    session=Depends(get_async_session),
+):
+    from sqlalchemy import desc, select
+
+    result = await session.execute(
+        select(Conversation)
+        .where(Conversation.user_id == user_id)
+        .order_by(desc(Conversation.updated_at))
+    )
+    conversations = result.scalars().all()
+
+    return ConversationListResponse(
+        conversations=[
+            ConversationResponse(
+                id=str(c.id),
+                title=c.title,
+                created_at=c.created_at.isoformat(),
+                updated_at=c.updated_at.isoformat(),
+            )
+            for c in conversations
+        ]
+    )
+
+
+@router.post("/conversations", response_model=ConversationResponse)
+async def api_create_conversation(
+    body: ConversationCreateRequest,
+    user_id: str = Depends(get_user_id),
+    session=Depends(get_async_session),
+):
+    from datetime import datetime, timezone
+
+    conv = Conversation(
+        user_id=user_id,
+        title=body.title or "New Chat",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session.add(conv)
+    await session.flush()
+    await session.refresh(conv)
+
+    return ConversationResponse(
+        id=str(conv.id),
+        title=conv.title,
+        created_at=conv.created_at.isoformat(),
+        updated_at=conv.updated_at.isoformat(),
+    )
+
+
+@router.get("/conversations/{conv_id}/messages", response_model=list[MessageResponse])
+async def api_get_messages(
+    conv_id: str,
+    user_id: str = Depends(get_user_id),
+    session=Depends(get_async_session),
+):
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(Conversation).where(
+            Conversation.id == conv_id,
+            Conversation.user_id == user_id,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msg_result = await session.execute(
+        select(Message)
+        .where(Message.conversation_id == conv.id)
+        .order_by(Message.created_at)
+    )
+    messages = msg_result.scalars().all()
+
+    return [
+        MessageResponse(
+            id=str(m.id),
+            role=m.role,
+            content=m.content,
+            sources=m.sources,
+            created_at=m.created_at.isoformat(),
+        )
+        for m in messages
+    ]
 
 
 app.include_router(router)

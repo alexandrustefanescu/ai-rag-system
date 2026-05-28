@@ -6,7 +6,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from rag_system.config import VectorStoreConfig
-from rag_system.models import Chunk
+from rag_system.models.base import Chunk
 
 logger = logging.getLogger(__name__)
 

@@ -77,6 +77,17 @@ class SSLConfig(BaseSettings):
     port: int = Field(default=8443, gt=0, le=65535)
 
 
+class ClerkConfig(BaseSettings):
+    """Clerk authentication settings."""
+
+    model_config = SettingsConfigDict(env_prefix="CLERK_", frozen=True)
+
+    domain: str = ""
+    secret_key: str = ""
+    jwt_key: str = ""
+    audience: str = ""
+
+
 class AppConfig(BaseSettings):
     """Top-level application configuration."""
 

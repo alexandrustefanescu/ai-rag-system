@@ -1,6 +1,7 @@
 export type AskRequest = {
   question: string;
   model?: string;
+  conversation_id?: string;
 };
 
 export type SourceResponse = {
